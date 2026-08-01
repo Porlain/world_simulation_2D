@@ -66,6 +66,24 @@ class ScenarioBundle(StrictModel):
     checksum: Sha256Hex
 
 
+class RunCreateRequest(StrictModel):
+    scenario_id: Identifier
+    seed: int | None = Field(default=None, ge=0, le=2**53 - 1)
+
+
+class RunCommandRequest(StrictModel):
+    action: Literal["pause", "resume", "end", "set_rate"]
+    rate: Literal[0.5, 1.0, 2.0, 4.0] | None = None
+
+    @model_validator(mode="after")
+    def validate_rate(self) -> "RunCommandRequest":
+        if self.action == "set_rate" and self.rate is None:
+            raise ValueError("set_rate requires rate")
+        if self.action != "set_rate" and self.rate is not None:
+            raise ValueError("rate is only allowed for set_rate")
+        return self
+
+
 class ConnectionActivity(StrictModel):
     departed: int = Field(ge=0)
     arrived: int = Field(ge=0)
