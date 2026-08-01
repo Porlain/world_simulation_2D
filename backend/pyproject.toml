@@ -1,0 +1,17 @@
+[project]
+name = "world-simulation-2d-backend"
+version = "0.1.0"
+description = "Deterministic city flow simulation backend"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  "pydantic>=2.8,<3",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8,<10",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
