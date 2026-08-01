@@ -377,7 +377,7 @@ onUnmounted(clearTimers);
               <span class="focus-marker"></span>
               <strong>{{ featureName(selectedFeatureId) }}</strong>
             </div>
-            <div v-else class="empty-line">点击地图上的地点或街道</div>
+            <div v-else class="empty-line">暂无选择</div>
             <dl v-if="selectedLocation && displayedSnapshot && flowId" class="metric-list">
               <div><dt>地点存量</dt><dd>{{ formatNumber(displayedSnapshot.location_counts[selectedLocation.id]?.[flowId] ?? 0) }}</dd></div>
               <div><dt>坐标</dt><dd>{{ selectedLocation.position[0] }}, {{ selectedLocation.position[1] }}</dd></div>

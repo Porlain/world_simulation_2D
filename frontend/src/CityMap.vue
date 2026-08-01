@@ -225,7 +225,7 @@ watch(() => [props.running, props.runRate], requestDraw);
 <template>
   <div ref="mapHost" class="city-map" aria-label="城市流量地图">
     <canvas ref="canvas" class="flow-canvas" aria-label="街道流量动画" role="img"></canvas>
-    <div v-if="!bundle" class="map-empty">选择一个场景开始</div>
+    <div v-if="!bundle" class="map-empty">暂无场景</div>
     <div class="map-legend" aria-label="流量图例">
       <span><i class="legend-dot legend-dot--clear"></i>通畅</span>
       <span><i class="legend-dot legend-dot--busy"></i>繁忙</span>
