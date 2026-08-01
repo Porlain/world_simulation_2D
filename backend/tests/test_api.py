@@ -48,6 +48,13 @@ def test_create_pause_resume_end_and_snapshot(tmp_path: Path) -> None:
         assert resumed.status_code == 200
         assert resumed.json()["run"]["status"] == "running"
 
+        rate = client.post(
+            f"/api/runs/{run_id}/commands",
+            json={"action": "set_rate", "rate": 2},
+        )
+        assert rate.status_code == 200
+        assert rate.json()["run"]["rate"] == 2.0
+
         snapshot = client.get(f"/api/runs/{run_id}/snapshots/0")
         assert snapshot.status_code == 200
         assert snapshot.json()["tick"] == 0

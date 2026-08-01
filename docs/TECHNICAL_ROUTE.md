@@ -69,7 +69,7 @@ scenarios/*.json
 - `id` 使用小写字母开头的 `a-z0-9_-`，场景 ID 全局唯一。
 - `path` 至少两个坐标点；连接是有向的，需要反向流量时显式写另一条连接。
 - `travel_time_ticks` 是离散 tick 数，不是前端动画时长。
-- `capacity_per_tick` 和 `demand_per_tick` 必须为每个 `flow_types[].id` 提供值。
+- `capacity_per_tick` 和 `demand_per_tick` 未提供的流量类型会归零；为避免静默生成无流量道路，场景文件应显式列出每个 `flow_types[].id`。
 - 场景加载时计算 SHA-256；运行创建时把完整 JSON 和 checksum 一起写入 `runs`，以后场景文件变化不会改变旧回放。
 
 新增场景只需要新增目录和 JSON，不需要改 Python 或 Vue 代码。目录中已有 `demo-city` 可作为最小模板。
