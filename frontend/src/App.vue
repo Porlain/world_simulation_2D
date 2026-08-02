@@ -125,9 +125,10 @@ async function loadInitial() {
   loading.value = false;
 }
 
-function updateFromDetail(detail: { run: RunRecord; scenario: ScenarioBundle | null; latest_snapshot: SnapshotResponse }) {
-  if (selectedRun.value?.id === detail.run.id) {
+function updateFromDetail(detail: { run: RunRecord; scenario: ScenarioBundle | null; latest_snapshot: SnapshotResponse }, force = false) {
+  if (!force && selectedRun.value?.id === detail.run.id) {
     if (selectedRun.value.status === "paused" && detail.run.status === "running") return;
+    if ((selectedRun.value.status === "ended" || selectedRun.value.status === "failed") && (detail.run.status === "running" || detail.run.status === "paused")) return;
     if (latestSnapshot.value && detail.latest_snapshot.tick < latestSnapshot.value.tick) return;
   }
   selectedRun.value = detail.run;
@@ -270,7 +271,7 @@ async function command(action: "pause" | "resume" | "end") {
       clearTimers();
       playbackPlaying.value = false;
     } else {
-      if (action === "pause") updateFromDetail(await getRun(result.run.id, false));
+      if (action === "pause") updateFromDetail(await getRun(result.run.id, false), true);
       schedulePoll();
     }
     await refreshRuns();

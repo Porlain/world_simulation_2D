@@ -49,6 +49,7 @@ test("runs, pauses, seeks, and ends a city simulation", async ({ page }, testInf
 
   await openControls();
   await page.getByRole("button", { name: "暂停" }).click();
+  await expect(page.getByRole("button", { name: "继续" })).toBeEnabled();
   const pausedTick = Number((await page.locator(".tick-readout").innerText()).replace(/\D/g, ""));
   await page.waitForTimeout(1_200);
   await expect(page.locator(".tick-readout")).toHaveText(`T+${pausedTick.toString().padStart(4, "0")}`);
