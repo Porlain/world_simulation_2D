@@ -143,6 +143,8 @@ def loaded_scenario_from_draft(draft: ScenarioDraft) -> LoadedScenario:
         checksum=draft.bundle_checksum,
         bundle_json=canonical_json(payload),
         bundle_schema_version=2,
+        town_skeleton=draft.town_skeleton,
+        simulation_package=draft.simulation_package,
     )
 
 

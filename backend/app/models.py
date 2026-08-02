@@ -249,3 +249,17 @@ class SnapshotState(StrictModel):
     transit_buckets: dict[str, dict[str, list[int]]]
     connection_activity: dict[str, dict[str, ConnectionActivity]]
     totals: dict[str, int]
+
+
+class ConnectionSnapshot(StrictModel):
+    departed: NonNegativeInt
+    arrived: NonNegativeInt
+    in_transit: NonNegativeInt
+
+
+class FlowSnapshot(StrictModel):
+    schema_version: Literal[2] = 2
+    tick: int = Field(ge=0)
+    location_counts: dict[str, CountMap]
+    connections: dict[str, dict[str, ConnectionSnapshot]]
+    totals: CountMap

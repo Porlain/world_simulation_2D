@@ -4,8 +4,16 @@ import asyncio
 import secrets
 from dataclasses import dataclass
 
-from .engine import SimulationInvariantError, initial_state, step
-from .models import RunCommandRequest, SnapshotState
+from .engine import (
+    SimulationInvariantError,
+    SimulationState,
+    initial_simulation_state,
+    initial_state,
+    project_flow_snapshot,
+    step,
+    step_simulation,
+)
+from .models import FlowSnapshot, RunCommandRequest, SnapshotState, SimulationPackage
 from .scenario import LoadedScenario, ScenarioCatalog
 from .storage import (
     ActiveRunExists,
@@ -29,7 +37,8 @@ class RunNotActive(RuntimeError):
 class ActiveRun:
     run: RunRecord
     scenario: LoadedScenario
-    state: SnapshotState
+    state: SnapshotState | SimulationState
+    package: SimulationPackage | None = None
 
 
 class RunController:
@@ -81,11 +90,17 @@ class RunController:
             if self.active_run is not None:
                 raise ActiveRunExists("another run is already active")
             actual_seed = seed if seed is not None else secrets.randbits(53)
-            state = initial_state(scenario.config)
+            package = scenario.simulation_package
+            if package is None:
+                state = initial_state(scenario.config)
+                initial_snapshot: SnapshotState | FlowSnapshot = state
+            else:
+                state = initial_simulation_state(package)
+                initial_snapshot = project_flow_snapshot(state, package)
             run = await asyncio.to_thread(
-                self.storage.create_run, scenario, actual_seed, state
+                self.storage.create_run, scenario, actual_seed, initial_snapshot
             )
-            self.active_run = ActiveRun(run=run, scenario=scenario, state=state)
+            self.active_run = ActiveRun(run=run, scenario=scenario, state=state, package=package)
             self.wake_event.set()
             return self.active_run
 
@@ -138,7 +153,7 @@ class RunController:
     async def get_detail(self, run_id: str, include_scenario: bool = False) -> RunDetail:
         return await asyncio.to_thread(self.storage.get_detail, run_id, include_scenario)
 
-    async def get_snapshot(self, run_id: str, tick: int) -> SnapshotState:
+    async def get_snapshot(self, run_id: str, tick: int) -> SnapshotState | FlowSnapshot:
         return await asyncio.to_thread(self.storage.get_snapshot, run_id, tick)
 
     async def list_runs(self, limit: int = 20) -> list[RunRecord]:
@@ -183,9 +198,14 @@ class RunController:
             # A slow tick must not cause a burst of concurrent work. The next
             # loop always waits one fresh interval from the committed tick.
 
-    def _compute_and_commit_sync(self, active: ActiveRun) -> SnapshotState:
-        next_state = step(active.scenario.config, active.state, active.run.seed)
-        self.storage.commit_tick(active.run.id, active.state.tick, next_state)
+    def _compute_and_commit_sync(self, active: ActiveRun) -> SnapshotState | SimulationState:
+        if active.package is None:
+            next_state = step(active.scenario.config, active.state, active.run.seed)  # type: ignore[arg-type]
+            committed = next_state
+        else:
+            next_state = step_simulation(active.package, active.state, active.run.seed)  # type: ignore[arg-type]
+            committed = project_flow_snapshot(next_state, active.package)
+        self.storage.commit_tick(active.run.id, active.state.tick, committed)
         return next_state
 
     async def _fail_active(self, active: ActiveRun, error: Exception) -> None:

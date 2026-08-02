@@ -86,6 +86,9 @@ def test_ready_draft_can_start_a_run_with_full_bundle(tmp_path: Path) -> None:
         assert body["run"]["seed"] == 19
         assert body["scenario"]["town_skeleton"]["scenario_id"] == ready["town_skeleton"]["scenario_id"]
         assert body["scenario"]["simulation_package"]["schema_version"] == 2
+        snapshot = client.get(f"/api/runs/{body['run']['id']}/snapshots/0")
+        assert snapshot.status_code == 200
+        assert snapshot.json()["state"]["schema_version"] == 2
         client.post(f"/api/runs/{body['run']['id']}/commands", json={"action": "end"})
 
 

@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from .models import ConnectionConfig, ScenarioConfig
+from .models import ConnectionConfig, ScenarioConfig, SimulationPackage, TownSkeleton
 
 
 class ScenarioValidationError(ValueError):
@@ -30,6 +30,8 @@ class LoadedScenario:
     checksum: str
     bundle_json: str
     bundle_schema_version: int = 1
+    town_skeleton: TownSkeleton | None = None
+    simulation_package: SimulationPackage | None = None
 
 
 def _unique_ids(values: list[str], kind: str) -> None:

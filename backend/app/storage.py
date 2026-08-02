@@ -7,8 +7,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from .models import SnapshotState
+from .models import FlowSnapshot, SnapshotState
 from .scenario import LoadedScenario, canonical_json
+
+Snapshot = SnapshotState | FlowSnapshot
+
+
+def parse_snapshot(raw: object) -> Snapshot:
+    if isinstance(raw, dict) and raw.get("schema_version") == 2:
+        return FlowSnapshot.model_validate(raw)
+    return SnapshotState.model_validate(raw)
 
 
 class StorageError(RuntimeError):
@@ -57,7 +65,7 @@ class RunDetail:
     scenario_bundle_json: str | None
     tick_min: int
     tick_max: int
-    latest_snapshot: SnapshotState
+    latest_snapshot: Snapshot
 
 
 SCHEMA_SQL = """
@@ -135,7 +143,7 @@ class Storage:
         self,
         scenario: LoadedScenario,
         seed: int,
-        initial_state: SnapshotState,
+        initial_state: Snapshot,
         started_at: str | None = None,
     ) -> RunRecord:
         run_id = uuid4().hex
@@ -230,10 +238,10 @@ class Storage:
             scenario_bundle_json=bundle["scenario_bundle_json"] if include_scenario else None,
             tick_min=int(bounds["tick_min"]),
             tick_max=int(bounds["tick_max"]),
-            latest_snapshot=SnapshotState.model_validate(json.loads(latest["state_json"])),
+            latest_snapshot=parse_snapshot(json.loads(latest["state_json"])),
         )
 
-    def get_snapshot(self, run_id: str, tick: int) -> SnapshotState:
+    def get_snapshot(self, run_id: str, tick: int) -> Snapshot:
         with self.connect() as connection:
             row = connection.execute(
                 "SELECT state_json FROM tick_snapshots WHERE run_id = ? AND tick = ?",
@@ -241,9 +249,9 @@ class Storage:
             ).fetchone()
         if row is None:
             raise SnapshotNotFound(f"{run_id}:{tick}")
-        return SnapshotState.model_validate(json.loads(row["state_json"]))
+        return parse_snapshot(json.loads(row["state_json"]))
 
-    def get_latest_snapshot(self, run_id: str) -> SnapshotState:
+    def get_latest_snapshot(self, run_id: str) -> Snapshot:
         with self.connect() as connection:
             row = connection.execute(
                 "SELECT state_json FROM tick_snapshots WHERE run_id = ? ORDER BY tick DESC LIMIT 1",
@@ -251,13 +259,13 @@ class Storage:
             ).fetchone()
         if row is None:
             raise SnapshotNotFound(run_id)
-        return SnapshotState.model_validate(json.loads(row["state_json"]))
+        return parse_snapshot(json.loads(row["state_json"]))
 
     def commit_tick(
         self,
         run_id: str,
         expected_tick: int,
-        next_state: SnapshotState,
+        next_state: Snapshot,
         created_at: str | None = None,
     ) -> None:
         if next_state.tick != expected_tick + 1:
