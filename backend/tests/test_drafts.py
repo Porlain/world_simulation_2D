@@ -48,6 +48,7 @@ def test_create_draft_returns_skeleton_before_or_after_compile(tmp_path: Path) -
         assert ready["compile_status"] == "ready"
         assert ready["simulation_package"]["schema_version"] == 2
         assert ready["bundle_checksum"]
+        assert ready["bundle"]["town_skeleton"]["scenario_id"] == ready["town_skeleton"]["scenario_id"]
         assert sum(
             location["initial_counts"]["pedestrian"]
             for location in ready["simulation_package"]["locations"]

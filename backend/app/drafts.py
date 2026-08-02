@@ -53,6 +53,13 @@ class ScenarioDraft:
     error_message: str | None = None
 
     def payload(self) -> dict[str, object]:
+        bundle = None
+        if self.simulation_package is not None and self.bundle_checksum is not None:
+            bundle = {
+                **bundle_payload(self.town_skeleton, self.simulation_package),
+                "checksum": self.bundle_checksum,
+                "bundle_checksum": self.bundle_checksum,
+            }
         return {
             "draft_id": self.id,
             "generation_seed": self.town_skeleton.generation_seed,
@@ -65,6 +72,7 @@ class ScenarioDraft:
                 else None
             ),
             "bundle_checksum": self.bundle_checksum,
+            "bundle": bundle,
             "error": (
                 {"code": self.error_code, "message": self.error_message}
                 if self.error_code is not None
