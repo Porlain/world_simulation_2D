@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { Deck, OrthographicView, type PickingInfo } from "@deck.gl/core";
+import { Deck, OrthographicView, type Layer, type PickingInfo } from "@deck.gl/core";
 import type { RunRate, ScenarioBundle, SnapshotState } from "./api";
 import {
   assembleTownRenderData,
+  createDynamicTownLayers,
   createStaticTownLayers,
   type TownFeature,
   type TownRenderData,
@@ -26,6 +27,7 @@ const renderError = ref<string | null>(null);
 let deck: Deck<OrthographicView> | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let renderData: TownRenderData | null = null;
+let staticLayers: Layer[] = [];
 
 function fittedViewState(data: TownRenderData) {
   const host = mapHost.value?.getBoundingClientRect();
@@ -42,11 +44,14 @@ function fittedViewState(data: TownRenderData) {
   };
 }
 
-function updateLayers(refit = false) {
+function updateLayers(refit = false, rebuildStatic = false) {
   if (!deck) return;
-  renderData = props.bundle ? assembleTownRenderData(props.bundle) : null;
+  if (rebuildStatic || (props.bundle && !renderData)) {
+    renderData = props.bundle ? assembleTownRenderData(props.bundle) : null;
+    staticLayers = renderData ? createStaticTownLayers(renderData, props.selectedFeatureId) : [];
+  }
   deck.setProps({
-    layers: renderData ? createStaticTownLayers(renderData, props.selectedFeatureId) : [],
+    layers: props.bundle ? [...staticLayers, ...createDynamicTownLayers(props.bundle, props.snapshot, props.selectedFeatureId)] : [],
     ...(refit && renderData ? { initialViewState: fittedViewState(renderData) } : {}),
   });
 }
@@ -75,7 +80,7 @@ onMounted(async () => {
       },
     } : null,
     onClick: ({ object }: PickingInfo<TownFeature>) => {
-      if (object) emit("select-feature", object.id);
+      if (object) emit("select-feature", (object as TownFeature & { sourceId?: string }).sourceId ?? object.id);
     },
     onError: (error) => {
       renderError.value = error instanceof Error ? error.message : "WebGL renderer failed";
@@ -90,10 +95,13 @@ onUnmounted(() => {
   resizeObserver?.disconnect();
   deck?.finalize();
   deck = null;
+  staticLayers = [];
+  renderData = null;
 });
 
-watch(() => props.bundle, () => updateLayers(true));
-watch(() => props.selectedFeatureId, () => updateLayers(false));
+watch(() => props.bundle, () => updateLayers(true, true));
+watch(() => props.selectedFeatureId, () => updateLayers(false, true));
+watch(() => props.snapshot?.tick, () => updateLayers(false));
 </script>
 
 <template>
@@ -105,6 +113,9 @@ watch(() => props.selectedFeatureId, () => updateLayers(false));
       <span><i class="legend-line legend-line--road"></i>街道</span>
       <span><i class="legend-building"></i>建筑</span>
       <span><i class="legend-landmark"></i>地标</span>
+      <span><i class="legend-dot legend-dot--people"></i>人流</span>
+      <span><i class="legend-diamond legend-diamond--vehicle"></i>车流</span>
+      <span><i class="legend-heat"></i>热力</span>
     </div>
     <div v-if="bundle" class="map-source">{{ bundle.town_skeleton ? "RADIAL-V1" : "LEGACY" }}</div>
     <div v-if="snapshot" class="map-stamp">T+{{ snapshot.tick.toString().padStart(4, "0") }}</div>

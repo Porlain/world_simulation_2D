@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { Check, CircleAlert, Gauge, History, MapPinned, Pause, Play, RotateCcw, Square } from "lucide-vue-next";
-import type { ApiError, RunRate, RunRecord, ScenarioBundle } from "./api";
+import type { ApiError, RunRate, RunRecord, ScenarioBundle, ScenarioDraft } from "./api";
 
 const props = defineProps<{
   scenarios: ScenarioBundle[];
@@ -10,6 +10,8 @@ const props = defineProps<{
   selectedRun: RunRecord | null;
   loading: boolean;
   error: ApiError | null;
+  draft: ScenarioDraft | null;
+  generationLoading: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -18,9 +20,12 @@ const emit = defineEmits<{
   (event: "start", seed?: number): void;
   (event: "command", action: "pause" | "resume" | "end"): void;
   (event: "set-rate", rate: RunRate): void;
+  (event: "generate-town", payload: { generationSeed?: number; population: number }): void;
 }>();
 
 const seedInput = ref("");
+const generationSeedInput = ref("");
+const populationInput = ref("11499");
 const rateOptions: RunRate[] = [0.5, 1, 2, 4];
 
 const selectedScenario = computed(() =>
@@ -28,11 +33,23 @@ const selectedScenario = computed(() =>
 );
 
 const activeRun = computed(() => props.selectedRun?.status === "running" || props.selectedRun?.status === "paused");
-const canStart = computed(() => Boolean(props.selectedScenarioId) && !props.runs.some((run) => run.status === "running" || run.status === "paused"));
+const canStart = computed(() =>
+  (Boolean(props.selectedScenarioId) || (props.draft?.compile_status === "ready" && Boolean(props.draft.bundle)))
+  && !props.runs.some((run) => run.status === "running" || run.status === "paused"),
+);
 
 function start() {
   const parsed = seedInput.value.trim() === "" ? undefined : Number(seedInput.value);
   emit("start", parsed !== undefined && Number.isSafeInteger(parsed) ? parsed : undefined);
+}
+
+function generateTown() {
+  const population = Number(populationInput.value);
+  const seedText = generationSeedInput.value.trim();
+  const generationSeed = seedText === "" ? undefined : Number(seedText);
+  if (!Number.isSafeInteger(population) || population < 100 || population > 100_000) return;
+  if (generationSeed !== undefined && (!Number.isSafeInteger(generationSeed) || generationSeed < 0)) return;
+  emit("generate-town", { population, ...(generationSeed === undefined ? {} : { generationSeed }) });
 }
 
 function statusLabel(status: RunRecord["status"]): string {
@@ -46,6 +63,26 @@ function timeLabel(value: string): string {
 
 <template>
   <aside class="control-rail" aria-label="运行控制">
+    <section class="rail-section rail-section--generation">
+      <div class="section-kicker"><MapPinned :size="14" aria-hidden="true" /> 生成城镇</div>
+      <div class="seed-row">
+        <label class="field-label" for="generation-seed-input">世界种子</label>
+        <input id="generation-seed-input" v-model="generationSeedInput" class="text-field" inputmode="numeric" placeholder="随机生成" :disabled="activeRun || loading || generationLoading" />
+      </div>
+      <div class="seed-row">
+        <label class="field-label" for="population-input">居民数量</label>
+        <input id="population-input" v-model="populationInput" class="text-field" type="number" min="100" max="100000" step="1" :disabled="activeRun || loading || generationLoading" />
+      </div>
+      <button class="action-button" type="button" :disabled="activeRun || loading || generationLoading" @click="generateTown">
+        <Play :size="15" aria-hidden="true" />
+        <span>{{ generationLoading ? "正在编译" : "生成城镇" }}</span>
+      </button>
+      <div v-if="draft" class="scenario-meta">
+        <span>{{ draft.town_skeleton.buildings.length }} 座建筑</span>
+        <span>{{ draft.town_skeleton.streets.length }} 条街道</span>
+        <span>{{ draft.compile_status === "ready" ? "已就绪" : draft.compile_status === "failed" ? "失败" : "编译中" }}</span>
+      </div>
+    </section>
     <section class="rail-section rail-section--scenario">
       <div class="section-kicker"><MapPinned :size="14" aria-hidden="true" /> 场景</div>
       <label class="field-label" for="scenario-select">当前场景</label>

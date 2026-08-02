@@ -1,10 +1,14 @@
 import { COORDINATE_SYSTEM, type Color, type Layer } from "@deck.gl/core";
-import { PathLayer, PolygonLayer, TextLayer } from "@deck.gl/layers";
+import { HeatmapLayer } from "@deck.gl/aggregation-layers";
+import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import type {
   BuildingKind,
   Coordinate,
+  FlowSnapshot,
   DistrictKind,
+  LegacySnapshotState,
   ScenarioBundle,
+  SnapshotState,
   TownLandmark,
 } from "./api";
 
@@ -25,6 +29,32 @@ export interface TownRenderData {
   streets: TownFeature[];
   walls: TownFeature[];
   landmarks: TownFeature[];
+}
+
+interface FlowRoad extends TownFeature {
+  path: Coordinate[];
+  peopleRatio: number;
+  vehicleRatio: number;
+}
+
+interface FlowPoint {
+  position: Coordinate;
+  weight: number;
+}
+
+interface FlowMarker extends TownFeature {
+  position: Coordinate;
+  flow: "people" | "vehicle";
+  sourceId: string;
+  polygon?: Coordinate[];
+}
+
+export interface TownFlowRenderData {
+  peopleHeat: FlowPoint[];
+  vehicleHeat: FlowPoint[];
+  roads: FlowRoad[];
+  peopleMarkers: FlowMarker[];
+  vehicleMarkers: FlowMarker[];
 }
 
 const districtColors: Record<DistrictKind, Color> = {
@@ -251,7 +281,7 @@ export function createStaticTownLayers(data: TownRenderData, selectedFeatureId: 
     }),
     new TextLayer<TownFeature>({
       id: "landmark-labels",
-      data: data.landmarks,
+      data: data.landmarks.filter((feature) => feature.kind === "gate" || feature.kind === "plaza" || feature.id === selectedFeatureId),
       ...common,
       pickable: false,
       billboard: true,
@@ -268,6 +298,245 @@ export function createStaticTownLayers(data: TownRenderData, selectedFeatureId: 
       background: true,
       getBackgroundColor: [6, 23, 31, 194],
       backgroundPadding: [4, 2],
+    }),
+  ];
+}
+
+type FlowConnection = {
+  id: string;
+  path: Coordinate[];
+  capacity: Record<string, number>;
+  travelTime: Record<string, number>;
+};
+
+function flowConnections(bundle: ScenarioBundle): FlowConnection[] {
+  if (bundle.simulation_package) {
+    return bundle.simulation_package.connections.map((connection) => ({
+      id: connection.id,
+      path: connection.path,
+      capacity: connection.capacity_per_tick,
+      travelTime: connection.travel_time_ticks,
+    }));
+  }
+  return bundle.config.connections.map((connection) => ({
+    id: connection.id,
+    path: connection.path,
+    capacity: connection.capacity_per_tick,
+    travelTime: { [bundle.config.flow_types[0]?.id ?? "citizen"]: connection.travel_time_ticks },
+  }));
+}
+
+function flowIds(bundle: ScenarioBundle): { people: string | null; vehicle: string | null } {
+  const types = bundle.simulation_package?.flow_types ?? bundle.config.flow_types;
+  const people = types.find((flow) => flow.id === "pedestrian" || flow.id === "citizen" || flow.unit === "people")?.id ?? types[0]?.id ?? null;
+  const vehicle = types.find((flow) => flow.id === "vehicle" || flow.unit === "vehicles")?.id ?? null;
+  return { people, vehicle };
+}
+
+function pathPoint(path: Coordinate[], progress: number): { position: Coordinate; angle: number } {
+  if (path.length < 2) return { position: path[0] ?? [0, 0], angle: 0 };
+  const lengths = path.slice(1).map((point, index) => Math.hypot(point[0] - path[index][0], point[1] - path[index][1]));
+  const total = Math.max(0.001, lengths.reduce((sum, length) => sum + length, 0));
+  let distance = ((progress % 1) + 1) % 1 * total;
+  for (let index = 0; index < lengths.length; index += 1) {
+    const length = lengths[index];
+    if (distance <= length || index === lengths.length - 1) {
+      const start = path[index];
+      const end = path[index + 1];
+      const ratio = length <= 0 ? 0 : distance / length;
+      return {
+        position: [start[0] + (end[0] - start[0]) * ratio, start[1] + (end[1] - start[1]) * ratio],
+        angle: Math.atan2(end[1] - start[1], end[0] - start[0]),
+      };
+    }
+    distance -= length;
+  }
+  return { position: path[path.length - 1], angle: 0 };
+}
+
+function snapshotFlow(snapshot: SnapshotState, connectionId: string, flowId: string): { inTransit: number; departed: number } {
+  if (snapshot.schema_version === 2) {
+    const value = (snapshot as FlowSnapshot).connections[connectionId]?.[flowId];
+    return { inTransit: value?.in_transit ?? 0, departed: value?.departed ?? 0 };
+  }
+  const value = (snapshot as LegacySnapshotState).connection_activity[connectionId]?.[flowId];
+  const buckets = (snapshot as LegacySnapshotState).transit_buckets[connectionId]?.[flowId] ?? [];
+  return { inTransit: buckets.reduce((sum, count) => sum + count, 0), departed: value?.departed ?? 0 };
+}
+
+function flowLocationCount(snapshot: SnapshotState, locationId: string, flowId: string): number {
+  return snapshot.location_counts[locationId]?.[flowId] ?? 0;
+}
+
+function markerPolygon(position: Coordinate, size: number, angle: number): Coordinate[] {
+  return [0, 1, 2, 3].map((index) => {
+    const theta = angle + Math.PI / 4 + index * Math.PI / 2;
+    return [position[0] + Math.cos(theta) * size, position[1] + Math.sin(theta) * size];
+  });
+}
+
+function flowLocations(bundle: ScenarioBundle): Array<{ id: string; position: Coordinate }> {
+  return (bundle.simulation_package?.locations ?? bundle.config.locations).map((location) => ({
+    id: location.id,
+    position: location.position,
+  }));
+}
+
+export function assembleTownFlowData(
+  bundle: ScenarioBundle,
+  snapshot: SnapshotState,
+  tickProgress = snapshot.tick,
+): TownFlowRenderData {
+  const { people, vehicle } = flowIds(bundle);
+  const connections = flowConnections(bundle);
+  const peopleHeat: FlowPoint[] = [];
+  const vehicleHeat: FlowPoint[] = [];
+  const roads: FlowRoad[] = [];
+  const peopleMarkers: FlowMarker[] = [];
+  const vehicleMarkers: FlowMarker[] = [];
+  const locationEntries = flowLocations(bundle);
+  const peopleLocationMax = Math.max(1, ...locationEntries.map((location) => people ? flowLocationCount(snapshot, location.id, people) : 0));
+  const vehicleLocationMax = Math.max(1, ...locationEntries.map((location) => vehicle ? flowLocationCount(snapshot, location.id, vehicle) : 0));
+
+  for (const location of locationEntries) {
+    if (people) peopleHeat.push({ position: location.position, weight: flowLocationCount(snapshot, location.id, people) / peopleLocationMax });
+    if (vehicle) vehicleHeat.push({ position: location.position, weight: flowLocationCount(snapshot, location.id, vehicle) / vehicleLocationMax });
+  }
+
+  for (const connection of connections) {
+    const peopleFlow = people ? snapshotFlow(snapshot, connection.id, people) : { inTransit: 0, departed: 0 };
+    const vehicleFlow = vehicle ? snapshotFlow(snapshot, connection.id, vehicle) : { inTransit: 0, departed: 0 };
+    const peopleCapacity = Math.max(1, (connection.capacity[people ?? ""] ?? 0) * (connection.travelTime[people ?? ""] ?? 1));
+    const vehicleCapacity = Math.max(1, (connection.capacity[vehicle ?? ""] ?? 0) * (connection.travelTime[vehicle ?? ""] ?? 1));
+    const peopleRatio = Math.min(1, peopleFlow.inTransit / peopleCapacity);
+    const vehicleRatio = Math.min(1, vehicleFlow.inTransit / vehicleCapacity);
+    roads.push({
+      id: connection.id,
+      name: connection.id,
+      kind: "flow-road",
+      path: connection.path,
+      peopleRatio,
+      vehicleRatio,
+    });
+
+    for (let sample = 0; sample < 7; sample += 1) {
+      const point = pathPoint(connection.path, sample / 6);
+      if (peopleRatio > 0) peopleHeat.push({ position: point.position, weight: peopleRatio });
+      if (vehicleRatio > 0) vehicleHeat.push({ position: point.position, weight: vehicleRatio });
+    }
+
+    const addMarkers = (flow: "people" | "vehicle", count: number, travelTime: number, target: FlowMarker[]) => {
+      const markerCount = Math.min(flow === "vehicle" ? 18 : 30, Math.max(0, Math.ceil(count / (flow === "vehicle" ? 2 : 18))));
+      for (let index = 0; index < markerCount; index += 1) {
+        const progress = (tickProgress / Math.max(1, travelTime) + index / markerCount) % 1;
+        const point = pathPoint(connection.path, progress);
+        target.push({
+          id: `${connection.id}-${flow}-${index}`,
+          name: flow === "vehicle" ? "车流" : "人流",
+          kind: flow,
+          position: point.position,
+          path: connection.path,
+          flow,
+          sourceId: connection.id,
+          polygon: flow === "vehicle" ? markerPolygon(point.position, 3.8, point.angle) : undefined,
+        });
+      }
+    };
+    if (people) addMarkers("people", peopleFlow.inTransit, connection.travelTime[people] ?? 1, peopleMarkers);
+    if (vehicle) addMarkers("vehicle", vehicleFlow.inTransit, connection.travelTime[vehicle] ?? 1, vehicleMarkers);
+  }
+  return { peopleHeat, vehicleHeat, roads, peopleMarkers, vehicleMarkers };
+}
+
+function heatLayer(
+  id: string,
+  data: FlowPoint[],
+  colorRange: Color[],
+): Layer {
+  return new HeatmapLayer<FlowPoint>({
+    id,
+    data,
+    coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
+    getPosition: (point) => point.position,
+    getWeight: (point) => point.weight,
+    radiusPixels: 26,
+    intensity: 1.25,
+    threshold: 0.035,
+    colorRange,
+    pickable: false,
+  });
+}
+
+export function createDynamicTownLayers(
+  bundle: ScenarioBundle,
+  snapshot: SnapshotState | null,
+  selectedFeatureId: string | null,
+  tickProgress?: number,
+): Layer[] {
+  if (!snapshot) return [];
+  const data = assembleTownFlowData(bundle, snapshot, tickProgress ?? snapshot.tick);
+  const common = { coordinateSystem: COORDINATE_SYSTEM.CARTESIAN } as const;
+  return [
+    heatLayer("people-heat", data.peopleHeat, [
+      [33, 132, 153, 0],
+      [36, 196, 187, 72],
+      [247, 192, 70, 170],
+      [225, 75, 65, 220],
+    ]),
+    heatLayer("vehicle-heat", data.vehicleHeat, [
+      [31, 99, 173, 0],
+      [42, 165, 221, 78],
+      [126, 111, 224, 168],
+      [231, 72, 113, 220],
+    ]),
+    new PathLayer<FlowRoad>({
+      id: "people-flow-roads",
+      data: data.roads.filter((road) => road.peopleRatio > 0),
+      ...common,
+      pickable: true,
+      widthUnits: "pixels",
+      capRounded: true,
+      jointRounded: true,
+      getPath: (road) => road.path!,
+      getColor: (road) => [76 + Math.round(170 * road.peopleRatio), 220 - Math.round(130 * road.peopleRatio), 214 - Math.round(110 * road.peopleRatio), 150 + Math.round(90 * road.peopleRatio)],
+      getWidth: (road) => 2 + road.peopleRatio * 5,
+    }),
+    new PathLayer<FlowRoad>({
+      id: "vehicle-flow-roads",
+      data: data.roads.filter((road) => road.vehicleRatio > 0),
+      ...common,
+      pickable: true,
+      widthUnits: "pixels",
+      capRounded: true,
+      jointRounded: true,
+      getPath: (road) => road.path!,
+      getColor: (road) => [75 + Math.round(160 * road.vehicleRatio), 139 - Math.round(65 * road.vehicleRatio), 236 - Math.round(80 * road.vehicleRatio), 120 + Math.round(100 * road.vehicleRatio)],
+      getWidth: (road) => 1.5 + road.vehicleRatio * 4,
+    }),
+    new ScatterplotLayer<FlowMarker>({
+      id: "people-flow-markers",
+      data: data.peopleMarkers,
+      ...common,
+      pickable: true,
+      radiusUnits: "pixels",
+      stroked: true,
+      getPosition: (marker) => marker.position,
+      getRadius: () => 3.2,
+      getFillColor: (marker) => marker.id.startsWith(`${selectedFeatureId ?? "!"}-`) ? [255, 231, 135, 255] : [151, 245, 224, 235],
+      getLineColor: [10, 54, 62, 230],
+      getLineWidth: 1,
+    }),
+    new PolygonLayer<FlowMarker>({
+      id: "vehicle-flow-markers",
+      data: data.vehicleMarkers,
+      ...common,
+      pickable: true,
+      stroked: true,
+      filled: true,
+      getPolygon: (marker) => marker.polygon!,
+      getFillColor: (marker) => marker.id.startsWith(`${selectedFeatureId ?? "!"}-`) ? [255, 231, 135, 255] : [115, 178, 247, 245],
+      getLineColor: [13, 39, 79, 245],
+      getLineWidth: 1,
     }),
   ];
 }

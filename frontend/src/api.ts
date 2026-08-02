@@ -50,6 +50,26 @@ export interface ScenarioBundle {
   bundle_checksum?: string;
 }
 
+export type DraftCompileStatus = "compiling" | "ready" | "failed";
+
+export interface ScenarioDraftRequest {
+  generation_seed?: number;
+  population: number;
+  name?: string;
+}
+
+export interface ScenarioDraft {
+  draft_id: string;
+  generation_seed: number;
+  skeleton_checksum: string;
+  compile_status: DraftCompileStatus;
+  town_skeleton: TownSkeleton;
+  simulation_package: SimulationPackage | null;
+  bundle_checksum: string | null;
+  bundle: ScenarioBundle | null;
+  error: { code: string; message: string } | null;
+}
+
 export type DistrictKind = "residential" | "market" | "industrial" | "storage" | "religious" | "civic" | "military" | "stable";
 export type BuildingKind = "residential" | "market" | "workshop" | "storage" | "religious" | "administrative" | "military" | "stable";
 
@@ -130,13 +150,33 @@ export interface ConnectionActivity {
   arrived: number;
 }
 
-export interface SnapshotState {
+export interface LegacySnapshotState {
   schema_version: 1;
   tick: number;
   location_counts: Record<string, Record<string, number>>;
   transit_buckets: Record<string, Record<string, number[]>>;
   connection_activity: Record<string, Record<string, ConnectionActivity>>;
   totals: Record<string, number>;
+}
+
+export interface ConnectionSnapshot {
+  departed: number;
+  arrived: number;
+  in_transit: number;
+}
+
+export interface FlowSnapshot {
+  schema_version: 2;
+  tick: number;
+  location_counts: Record<string, Record<string, number>>;
+  connections: Record<string, Record<string, ConnectionSnapshot>>;
+  totals: Record<string, number>;
+}
+
+export type SnapshotState = LegacySnapshotState | FlowSnapshot;
+
+export function isFlowSnapshot(snapshot: SnapshotState | null | undefined): snapshot is FlowSnapshot {
+  return snapshot?.schema_version === 2;
 }
 
 export type RunStatus = "running" | "paused" | "ended" | "failed";
@@ -217,6 +257,21 @@ export async function listScenarios(signal?: AbortSignal): Promise<{ items: Scen
   return request("/api/scenarios", { signal });
 }
 
+export async function createScenarioDraft(
+  payload: ScenarioDraftRequest,
+  signal?: AbortSignal,
+): Promise<ScenarioDraft> {
+  return request("/api/scenario-drafts", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function getScenarioDraft(draftId: string, signal?: AbortSignal): Promise<ScenarioDraft> {
+  return request(`/api/scenario-drafts/${encodeURIComponent(draftId)}`, { signal });
+}
+
 export async function createRun(
   scenarioId: string,
   seed?: number,
@@ -225,6 +280,18 @@ export async function createRun(
   return request("/api/runs", {
     method: "POST",
     body: JSON.stringify({ scenario_id: scenarioId, ...(seed === undefined ? {} : { seed }) }),
+    signal,
+  });
+}
+
+export async function createDraftRun(
+  draftId: string,
+  simulationSeed?: number,
+  signal?: AbortSignal,
+): Promise<RunDetail> {
+  return request("/api/runs", {
+    method: "POST",
+    body: JSON.stringify({ draft_id: draftId, ...(simulationSeed === undefined ? {} : { simulation_seed: simulationSeed }) }),
     signal,
   });
 }

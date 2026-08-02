@@ -63,6 +63,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 
 .brand-lockup { min-width: 0; gap: 11px; }
+.brand-lockup > div:last-child { min-width: 0; }
 
 .brand-mark {
   display: grid;
@@ -259,6 +260,10 @@ h1 span { color: #a9c9ba; font-size: 12px; font-weight: 400; }
 .legend-building { width: 9px; height: 9px; background: rgb(32 169 197 / 72%); border: 1px solid #78d5df; }
 .legend-landmark { width: 9px; height: 9px; background: #efc35c; border: 1px solid #f7e2a8; transform: rotate(45deg); }
 .legend-dot { width: 7px; height: 7px; border-radius: 50%; }
+.legend-dot--people { background: #97f5e0; box-shadow: 0 0 7px rgb(151 245 224 / 85%); }
+.legend-diamond { width: 8px; height: 8px; transform: rotate(45deg); }
+.legend-diamond--vehicle { background: #73b2f7; border: 1px solid #d5e8ff; }
+.legend-heat { width: 15px; height: 6px; background: linear-gradient(90deg, #2595d7, #f7c04a, #df4d46); border-radius: 4px; box-shadow: 0 0 8px rgb(247 192 74 / 45%); }
 .legend-dot--clear { background: #9cc4b8; }
 .legend-dot--busy { background: #d4a445; }
 .legend-dot--full { background: #d56443; }
@@ -322,9 +327,11 @@ h1 span { color: #a9c9ba; font-size: 12px; font-weight: 400; }
   .topbar { padding: 0 14px; }
   .brand-eyebrow { display: none; }
   h1 { font-size: 16px; }
-  h1 span { font-size: 10px; }
+  h1 { max-width: 45vw; }
+  h1 span { display: none; }
   .topbar-readout { margin-left: auto; font-size: 10px; }
   .readout-label, .readout-divider { display: none; }
+  .status-label { display: none; }
   .mobile-tools { display: flex; }
   .workspace { display: block; }
   .map-workspace { position: absolute; inset: 0; }
@@ -334,7 +341,7 @@ h1 span { color: #a9c9ba; font-size: 12px; font-weight: 400; }
   .panel-shell--open { transform: translateX(0); }
   .panel-shell .control-rail, .panel-shell .stats-panel { width: 100%; border: 0; }
   .mobile-backdrop { position: fixed; inset: 56px 0 88px; z-index: 900; display: block; padding: 0; background: rgb(20 26 25 / 42%); border: 0; }
-  .map-legend { right: 10px; bottom: 10px; gap: 8px; padding: 7px; }
+  .map-legend { right: 10px; bottom: 10px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 20px); gap: 8px; padding: 7px; }
   .map-legend span { font-size: 9px; }
   .map-stamp { top: 10px; left: 10px; }
   .timeline { grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; padding: 0 12px; }
