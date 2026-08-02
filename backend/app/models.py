@@ -206,8 +206,22 @@ class SimulationPackage(StrictModel):
 
 
 class RunCreateRequest(StrictModel):
-    scenario_id: Identifier
+    scenario_id: Identifier | None = None
+    draft_id: Identifier | None = None
+    simulation_seed: int | None = Field(default=None, ge=0, le=2**53 - 1)
     seed: int | None = Field(default=None, ge=0, le=2**53 - 1)
+
+    @model_validator(mode="after")
+    def validate_target_and_seed(self) -> "RunCreateRequest":
+        if (self.scenario_id is None) == (self.draft_id is None):
+            raise ValueError("provide exactly one of scenario_id or draft_id")
+        if self.seed is not None and self.simulation_seed is not None:
+            raise ValueError("provide only one simulation seed")
+        return self
+
+    @property
+    def resolved_seed(self) -> int | None:
+        return self.simulation_seed if self.simulation_seed is not None else self.seed
 
 
 class RunCommandRequest(StrictModel):

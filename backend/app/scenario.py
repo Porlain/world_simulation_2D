@@ -29,6 +29,7 @@ class LoadedScenario:
     config: ScenarioConfig
     checksum: str
     bundle_json: str
+    bundle_schema_version: int = 1
 
 
 def _unique_ids(values: list[str], kind: str) -> None:

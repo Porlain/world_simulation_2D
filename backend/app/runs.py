@@ -71,12 +71,15 @@ class RunController:
                 self.active_run = None
 
     async def start(self, scenario_id: str, seed: int | None = None) -> ActiveRun:
+        scenario = self.catalog.get(scenario_id)
+        if scenario is None:
+            raise ScenarioNotFound(scenario_id)
+        return await self.start_loaded(scenario, seed)
+
+    async def start_loaded(self, scenario: LoadedScenario, seed: int | None = None) -> ActiveRun:
         async with self.lock:
             if self.active_run is not None:
                 raise ActiveRunExists("another run is already active")
-            scenario = self.catalog.get(scenario_id)
-            if scenario is None:
-                raise ScenarioNotFound(scenario_id)
             actual_seed = seed if seed is not None else secrets.randbits(53)
             state = initial_state(scenario.config)
             run = await asyncio.to_thread(

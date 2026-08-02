@@ -6,8 +6,16 @@ from hashlib import sha256
 from uuid import uuid4
 
 from .flow import FlowCompileError, compile_flow
-from .models import SimulationPackage, TownGenerationRequest, TownSkeleton
-from .scenario import canonical_json
+from .models import (
+    ConnectionConfig,
+    FlowTypeConfig,
+    LocationConfig,
+    ScenarioConfig,
+    SimulationPackage,
+    TownGenerationRequest,
+    TownSkeleton,
+)
+from .scenario import LoadedScenario, canonical_json
 from .town import generate_town, town_skeleton_checksum
 
 MAX_DRAFTS = 8
@@ -22,6 +30,14 @@ class DraftNotFound(DraftError):
 
 
 class DraftCapacityReached(DraftError):
+    pass
+
+
+class DraftNotReady(DraftError):
+    pass
+
+
+class ScenarioCompileFailed(DraftError):
     pass
 
 
@@ -58,6 +74,7 @@ class ScenarioDraft:
 
 
 def bundle_payload(town: TownSkeleton, package: SimulationPackage) -> dict[str, object]:
+    config = legacy_config(town, package)
     return {
         "schema_version": 2,
         "source_metadata": {
@@ -68,11 +85,65 @@ def bundle_payload(town: TownSkeleton, package: SimulationPackage) -> dict[str, 
         },
         "town_skeleton": town.model_dump(mode="json"),
         "simulation_package": package.model_dump(mode="json"),
+        # Transitional adapter for the v1 engine and existing clients.
+        "config": config.model_dump(mode="json"),
     }
 
 
 def bundle_checksum(town: TownSkeleton, package: SimulationPackage) -> str:
     return sha256(canonical_json(bundle_payload(town, package)).encode("utf-8")).hexdigest()
+
+
+def legacy_config(town: TownSkeleton, package: SimulationPackage) -> ScenarioConfig:
+    locations = [
+        LocationConfig(
+            id=location.id,
+            name=location.name,
+            position=location.position,
+            initial_counts=location.initial_counts,
+        )
+        for location in package.locations
+    ]
+    connections = [
+        ConnectionConfig(
+            id=connection.id,
+            from_location_id=connection.from_location_id,
+            to_location_id=connection.to_location_id,
+            path=connection.path,
+            travel_time_ticks=max(connection.travel_time_ticks.values()),
+            capacity_per_tick=connection.capacity_per_tick,
+            demand_per_tick=connection.demand_per_tick,
+        )
+        for connection in package.connections
+    ]
+    return ScenarioConfig(
+        schema_version=1,
+        scenario_id=town.scenario_id,
+        name=town.name,
+        scale="city",
+        tick_seconds=1,
+        coordinate_system="local_xy",
+        axis_orientation="x_right_y_up",
+        coordinate_unit="scene_unit",
+        flow_types=[FlowTypeConfig.model_validate(flow.model_dump()) for flow in package.flow_types],
+        locations=locations,
+        connections=connections,
+    )
+
+
+def loaded_scenario_from_draft(draft: ScenarioDraft) -> LoadedScenario:
+    if draft.compile_status == "compiling":
+        raise DraftNotReady(draft.id)
+    if draft.compile_status == "failed" or draft.simulation_package is None or draft.bundle_checksum is None:
+        raise ScenarioCompileFailed(draft.id)
+    config = legacy_config(draft.town_skeleton, draft.simulation_package)
+    payload = bundle_payload(draft.town_skeleton, draft.simulation_package)
+    return LoadedScenario(
+        config=config,
+        checksum=draft.bundle_checksum,
+        bundle_json=canonical_json(payload),
+        bundle_schema_version=2,
+    )
 
 
 class DraftManager:
@@ -89,7 +160,7 @@ class DraftManager:
                 raise DraftCapacityReached("draft capacity reached")
             town = await asyncio.to_thread(generate_town, request)
             draft = ScenarioDraft(
-                id=uuid4().hex,
+                id=f"draft-{uuid4().hex}",
                 town_skeleton=town,
                 skeleton_checksum=town_skeleton_checksum(town),
             )

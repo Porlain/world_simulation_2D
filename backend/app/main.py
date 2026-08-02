@@ -14,7 +14,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .drafts import DraftCapacityReached, DraftManager, DraftNotFound
+from .drafts import (
+    DraftCapacityReached,
+    DraftManager,
+    DraftNotFound,
+    DraftNotReady,
+    ScenarioCompileFailed,
+    loaded_scenario_from_draft,
+)
 from .models import RunCommandRequest, RunCreateRequest, TownGenerationRequest
 from .runs import RunController, RunNotActive, ScenarioNotFound
 from .scenario import ScenarioCatalog, ScenarioValidationError
@@ -71,10 +78,17 @@ def _scenario_payload(loaded) -> dict[str, Any]:
 def _detail_payload(detail, include_scenario: bool) -> dict[str, Any]:
     scenario = None
     if include_scenario and detail.scenario_bundle_json is not None:
-        scenario = {
-            "config": json.loads(detail.scenario_bundle_json),
-            "checksum": detail.run.scenario_checksum,
-        }
+        raw_bundle = json.loads(detail.scenario_bundle_json)
+        if raw_bundle.get("schema_version") == 2:
+            scenario = {
+                "config": raw_bundle["config"],
+                "checksum": detail.run.scenario_checksum,
+                "town_skeleton": raw_bundle["town_skeleton"],
+                "simulation_package": raw_bundle["simulation_package"],
+                "bundle_checksum": detail.run.scenario_checksum,
+            }
+        else:
+            scenario = {"config": raw_bundle, "checksum": detail.run.scenario_checksum}
     return {
         "run": _record_payload(detail.run),
         "scenario": scenario,
@@ -138,6 +152,14 @@ def create_app(
     async def draft_capacity_handler(_: Request, exception: DraftCapacityReached):
         return _error("draft_capacity_reached", str(exception), 429)
 
+    @application.exception_handler(DraftNotReady)
+    async def draft_not_ready_handler(_: Request, exception: DraftNotReady):
+        return _error("draft_not_ready", "Scenario draft is still compiling.", 409, {"draft_id": str(exception)})
+
+    @application.exception_handler(ScenarioCompileFailed)
+    async def scenario_compile_failed_handler(_: Request, exception: ScenarioCompileFailed):
+        return _error("scenario_compile_failed", "Scenario draft compilation failed.", 422, {"draft_id": str(exception)})
+
     @application.exception_handler(ScenarioNotFound)
     async def scenario_not_found_handler(_: Request, exception: ScenarioNotFound):
         return _error("scenario_not_found", "Scenario not found.", 404, {"scenario_id": str(exception)})
@@ -185,7 +207,13 @@ def create_app(
     @application.post("/api/runs", status_code=201)
     async def create_run(payload: RunCreateRequest, request: Request):
         controller: RunController = request.app.state.controller
-        active = await controller.start(payload.scenario_id, payload.seed)
+        if payload.draft_id is not None:
+            drafts: DraftManager = request.app.state.drafts
+            draft = await drafts.get(payload.draft_id)
+            scenario = loaded_scenario_from_draft(draft)
+            active = await controller.start_loaded(scenario, payload.resolved_seed)
+        else:
+            active = await controller.start(payload.scenario_id, payload.resolved_seed)  # type: ignore[arg-type]
         detail = await controller.get_detail(active.run.id, include_scenario=True)
         return _detail_payload(detail, include_scenario=True)
 

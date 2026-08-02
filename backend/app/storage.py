@@ -155,7 +155,7 @@ class Storage:
                         (
                             run_id,
                             scenario.config.scenario_id,
-                            scenario.config.schema_version,
+                            scenario.bundle_schema_version,
                             scenario.checksum,
                             scenario.bundle_json,
                             seed,
