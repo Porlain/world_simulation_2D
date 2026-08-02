@@ -24,8 +24,8 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 (
-  cd "$ROOT_DIR/backend"
-  FLOW_DB_PATH="$DB_PATH" uv run uvicorn app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT"
+  cd "$ROOT_DIR"
+  FLOW_DB_PATH="$DB_PATH" uv run uvicorn app.main:app --app-dir backend --host "$BACKEND_HOST" --port "$BACKEND_PORT"
 ) &
 backend_pid=$!
 

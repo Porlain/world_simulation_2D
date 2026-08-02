@@ -18,7 +18,7 @@
 
 ```bash
 cd /share_data/songzun/classes/world_simulation_2D
-uv sync --project backend
+uv sync --frozen
 npm --prefix frontend ci
 bash scripts/dev.sh
 ```
@@ -43,27 +43,28 @@ bash scripts/dev.sh
 
 ```bash
 npm --prefix frontend run build
-cd backend
-FLOW_DB_PATH=../data/flow.sqlite3 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+FLOW_DB_PATH=data/flow.sqlite3 uv run uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000
 ```
 
 ## 测试
 
 ```bash
-cd backend && uv run pytest
-cd ../frontend && npm run typecheck && npm run build
-npm run test:e2e
+uv run pytest
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
+npm --prefix frontend run test:e2e
 ```
 
 端到端测试会按配置启动后端和前端；若已有 `8000`/`5173` 服务会复用它们。容量验收测试会推进 demo 场景 3600 tick，并检查耗时和数据库体积：
 
 ```bash
-cd backend && uv run pytest tests/test_capacity.py -q
+uv run pytest backend/tests/test_capacity.py -q
 ```
 
 ## 目录
 
 ```text
+pyproject.toml / uv.lock     根目录 Python 工具链与锁文件
 backend/app/                 引擎、场景校验、SQLite、运行控制和 HTTP API
 backend/tests/               后端单元/API/容量测试
 scenarios/demo-city/         可提交到 Git 的场景 JSON

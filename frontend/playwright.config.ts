@@ -22,7 +22,7 @@ export default defineConfig({
   webServer: [
     {
       command:
-        "FLOW_DB_PATH=../data/e2e.sqlite3 ../backend/.venv/bin/uvicorn app.main:app --app-dir ../backend --host 127.0.0.1 --port 8000",
+        "FLOW_DB_PATH=../data/e2e.sqlite3 ../.venv/bin/uvicorn app.main:app --app-dir ../backend --host 127.0.0.1 --port 8000",
       url: "http://127.0.0.1:8000/api/scenarios",
       reuseExistingServer: true,
       timeout: 120_000,
