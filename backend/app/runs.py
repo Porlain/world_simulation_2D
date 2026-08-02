@@ -41,7 +41,7 @@ class ActiveRun:
     package: SimulationPackage | None = None
 
 
-class RunController:
+class EngineHost:
     def __init__(self, storage: Storage, catalog: ScenarioCatalog):
         self.storage = storage
         self.catalog = catalog
@@ -50,14 +50,21 @@ class RunController:
         self.wake_event = asyncio.Event()
         self.shutting_down = False
         self.scheduler_task: asyncio.Task[None] | None = None
+        self._status = "booting"
 
     async def start_scheduler(self) -> None:
         if self.scheduler_task is not None:
             return
         self.shutting_down = False
         self.scheduler_task = asyncio.create_task(self._scheduler_loop())
+        self._status = "idle"
+
+    @property
+    def status(self) -> str:
+        return self._status
 
     async def stop_scheduler(self) -> None:
+        self._status = "stopping"
         self.shutting_down = True
         self.wake_event.set()
         if self.scheduler_task is not None:
@@ -78,6 +85,7 @@ class RunController:
                 except Exception:
                     pass
                 self.active_run = None
+        self._status = "stopped"
 
     async def start(self, scenario_id: str, seed: int | None = None) -> ActiveRun:
         scenario = self.catalog.get(scenario_id)
@@ -101,6 +109,7 @@ class RunController:
                 self.storage.create_run, scenario, actual_seed, initial_snapshot
             )
             self.active_run = ActiveRun(run=run, scenario=scenario, state=state, package=package)
+            self._status = "running"
             self.wake_event.set()
             return self.active_run
 
@@ -123,6 +132,7 @@ class RunController:
                 active.run = await asyncio.to_thread(
                     self.storage.set_status, run_id, ("running",), "paused"
                 )
+                self._status = "idle"
             elif request.action == "resume":
                 if current == "running":
                     return active.run
@@ -131,6 +141,7 @@ class RunController:
                 active.run = await asyncio.to_thread(
                     self.storage.set_status, run_id, ("paused",), "running"
                 )
+                self._status = "running"
             elif request.action == "end":
                 if current not in {"running", "paused"}:
                     raise RunNotActive(run_id)
@@ -141,6 +152,7 @@ class RunController:
                     "ended",
                 )
                 self.active_run = None
+                self._status = "idle"
             elif request.action == "set_rate":
                 active.run = await asyncio.to_thread(
                     self.storage.set_rate, run_id, float(request.rate)
@@ -166,6 +178,8 @@ class RunController:
         while not self.shutting_down:
             active = self.active_run
             if active is None or active.run.status != "running":
+                if not self.shutting_down:
+                    self._status = "idle"
                 await self.wake_event.wait()
                 self.wake_event.clear()
                 continue
@@ -191,6 +205,7 @@ class RunController:
                 except Exception as error:
                     await self._fail_active(active, error)
                     self.active_run = None
+                    self._status = "idle"
                     continue
                 active.state = next_state
                 active.run = await asyncio.to_thread(self.storage.get_run, active.run.id)
@@ -229,3 +244,7 @@ class RunController:
             )
         except Exception:
             pass
+
+
+# Kept for callers that imported the pre-EngineHost name.
+RunController = EngineHost

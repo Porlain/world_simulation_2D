@@ -22,7 +22,15 @@ def client_for(tmp_path: Path) -> TestClient:
 
 def test_list_scenarios_returns_normalized_bundle(tmp_path: Path) -> None:
     with client_for(tmp_path) as client:
+        health = client.get("/api/health")
         response = client.get("/api/scenarios")
+    assert health.status_code == 200
+    assert health.json() == {
+        "status": "ok",
+        "engine_host": "idle",
+        "storage": "ready",
+        "catalog": "ready",
+    }
     assert response.status_code == 200
     body = response.json()
     assert body["items"][0]["config"]["scenario_id"] == "demo-city"
@@ -36,10 +44,12 @@ def test_create_pause_resume_end_and_snapshot(tmp_path: Path) -> None:
         run = created.json()["run"]
         assert run["current_tick"] == 0
         run_id = run["id"]
+        assert client.get("/api/health").json()["engine_host"] == "running"
 
         paused = client.post(f"/api/runs/{run_id}/commands", json={"action": "pause"})
         assert paused.status_code == 200
         assert paused.json()["run"]["status"] == "paused"
+        assert client.get("/api/health").json()["engine_host"] == "idle"
         assert client.post(
             f"/api/runs/{run_id}/commands", json={"action": "pause"}
         ).json()["run"]["status"] == "paused"
@@ -47,6 +57,7 @@ def test_create_pause_resume_end_and_snapshot(tmp_path: Path) -> None:
         resumed = client.post(f"/api/runs/{run_id}/commands", json={"action": "resume"})
         assert resumed.status_code == 200
         assert resumed.json()["run"]["status"] == "running"
+        assert client.get("/api/health").json()["engine_host"] == "running"
 
         rate = client.post(
             f"/api/runs/{run_id}/commands",

@@ -23,7 +23,7 @@ from .drafts import (
     loaded_scenario_from_draft,
 )
 from .models import RunCommandRequest, RunCreateRequest, TownGenerationRequest
-from .runs import RunController, RunNotActive, ScenarioNotFound
+from .runs import EngineHost, RunNotActive, ScenarioNotFound
 from .scenario import ScenarioCatalog, ScenarioValidationError
 from .storage import (
     ActiveRunExists,
@@ -113,16 +113,26 @@ def create_app(
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         storage = Storage(resolved_db)
-        await asyncio.to_thread(storage.initialize)
-        await asyncio.to_thread(storage.recover_interrupted_runs)
-        catalog = await asyncio.to_thread(ScenarioCatalog.load_all, resolved_scenarios)
-        controller = RunController(storage, catalog)
+
+        async def prepare_storage() -> Storage:
+            await asyncio.to_thread(storage.initialize)
+            await asyncio.to_thread(storage.recover_interrupted_runs)
+            return storage
+
+        storage_task = asyncio.create_task(prepare_storage())
+        catalog_task = asyncio.create_task(
+            asyncio.to_thread(ScenarioCatalog.load_all, resolved_scenarios)
+        )
+        storage, catalog = await asyncio.gather(storage_task, catalog_task)
+        controller = EngineHost(storage, catalog)
         drafts = DraftManager()
         await controller.start_scheduler()
         application.state.storage = storage
         application.state.catalog = catalog
         application.state.controller = controller
         application.state.drafts = drafts
+        application.state.storage_ready = True
+        application.state.catalog_ready = True
         try:
             yield
         finally:
@@ -188,9 +198,23 @@ def create_app(
     async def storage_error_handler(_: Request, exception: StorageError):
         return _error("storage_error", "The database operation failed.", 500)
 
+    @application.get("/api/health")
+    async def health(request: Request):
+        controller: EngineHost = request.app.state.controller
+        storage_ready = bool(getattr(request.app.state, "storage_ready", False))
+        catalog_ready = bool(getattr(request.app.state, "catalog_ready", False))
+        ready = storage_ready and catalog_ready and controller.status not in {"booting", "stopped"}
+        payload = {
+            "status": "ok" if ready else "unavailable",
+            "engine_host": controller.status,
+            "storage": "ready" if storage_ready else "booting",
+            "catalog": "ready" if catalog_ready else "booting",
+        }
+        return JSONResponse(status_code=200 if ready else 503, content=payload)
+
     @application.get("/api/scenarios")
     async def list_scenarios(request: Request):
-        controller: RunController = request.app.state.controller
+        controller: EngineHost = request.app.state.controller
         return {"items": [_scenario_payload(scenario) for scenario in await controller.list_scenarios()]}
 
     @application.post("/api/scenario-drafts", status_code=202)
@@ -206,7 +230,7 @@ def create_app(
 
     @application.post("/api/runs", status_code=201)
     async def create_run(payload: RunCreateRequest, request: Request):
-        controller: RunController = request.app.state.controller
+        controller: EngineHost = request.app.state.controller
         if payload.draft_id is not None:
             drafts: DraftManager = request.app.state.drafts
             draft = await drafts.get(payload.draft_id)
@@ -219,19 +243,19 @@ def create_app(
 
     @application.get("/api/runs")
     async def list_runs(request: Request, limit: int = Query(default=20, ge=1, le=100)):
-        controller: RunController = request.app.state.controller
+        controller: EngineHost = request.app.state.controller
         records = await controller.list_runs(limit)
         return {"items": [_record_payload(record) for record in records]}
 
     @application.get("/api/runs/{run_id}")
     async def get_run(run_id: str, request: Request, include_scenario: bool = False):
-        controller: RunController = request.app.state.controller
+        controller: EngineHost = request.app.state.controller
         detail = await controller.get_detail(run_id, include_scenario)
         return _detail_payload(detail, include_scenario)
 
     @application.post("/api/runs/{run_id}/commands")
     async def command_run(run_id: str, payload: RunCommandRequest, request: Request):
-        controller: RunController = request.app.state.controller
+        controller: EngineHost = request.app.state.controller
         record = await controller.command(run_id, payload)
         return {"run": _record_payload(record)}
 
@@ -239,7 +263,7 @@ def create_app(
     async def get_snapshot(run_id: str, tick: int, request: Request):
         if tick < 0:
             raise SnapshotNotFound(f"{run_id}:{tick}")
-        controller: RunController = request.app.state.controller
+        controller: EngineHost = request.app.state.controller
         state = await controller.get_snapshot(run_id, tick)
         return {"run_id": run_id, "tick": state.tick, "state": state.model_dump(mode="json")}
 
