@@ -9,6 +9,9 @@ Sha256Hex = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Coordinate = tuple[FiniteFloat, FiniteFloat]
 Bounds = tuple[FiniteFloat, FiniteFloat, FiniteFloat, FiniteFloat]
 Polygon = Annotated[list[Coordinate], Field(min_length=3)]
+NonNegativeInt = Annotated[int, Field(ge=0)]
+PositiveTick = Annotated[int, Field(ge=1, le=3600)]
+CountMap = dict[str, NonNegativeInt]
 
 
 class StrictModel(BaseModel):
@@ -167,6 +170,39 @@ class TownSkeleton(StrictModel):
     junctions: list[TownJunction] = Field(min_length=1)
     streets: list[TownStreet] = Field(min_length=1)
     landmarks: list[TownLandmark] = Field(min_length=1)
+
+
+class FlowLocation(StrictModel):
+    id: Identifier
+    name: str = Field(min_length=1, max_length=64)
+    kind: Literal["gate", "plaza", "landmark", "district"]
+    position: Coordinate
+    initial_counts: CountMap
+
+
+class FlowConnection(StrictModel):
+    id: Identifier
+    from_location_id: Identifier
+    to_location_id: Identifier
+    street_segment_ids: list[Identifier] = Field(min_length=1)
+    path: list[Coordinate] = Field(min_length=2)
+    travel_time_ticks: dict[str, PositiveTick]
+    capacity_per_tick: CountMap
+    demand_per_tick: dict[str, DemandRange]
+
+
+class FlowBindings(StrictModel):
+    location_feature_ids: dict[str, list[Identifier]]
+    connection_street_ids: dict[str, list[Identifier]]
+
+
+class SimulationPackage(StrictModel):
+    schema_version: Literal[2] = 2
+    tick_seconds: Literal[1] = 1
+    flow_types: list[FlowTypeConfig] = Field(min_length=1)
+    locations: list[FlowLocation] = Field(min_length=2)
+    connections: list[FlowConnection] = Field(min_length=1)
+    bindings: FlowBindings
 
 
 class RunCreateRequest(StrictModel):
