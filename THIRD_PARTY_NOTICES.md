@@ -5,7 +5,7 @@
 | 组件 | 用途 | 许可证 | 上游 |
 | --- | --- | --- | --- |
 | Vue 3 | 前端 UI | MIT | <https://github.com/vuejs/core> |
-| Leaflet | 本地坐标地图绘制 | BSD-2-Clause | <https://github.com/Leaflet/Leaflet> |
+| deck.gl `@deck.gl/core`, `@deck.gl/layers`, `@deck.gl/aggregation-layers` 9.3.7 | 本地 XY 城镇、道路、建筑、点标记和热力渲染 | MIT | <https://github.com/visgl/deck.gl> |
 | Lucide | UI 图标 | ISC | <https://github.com/lucide-icons/lucide> |
 | Noto Sans SC Variable | 中文字体 | SIL OFL 1.1 | <https://github.com/google/fonts> |
 | FastAPI | HTTP API | MIT | <https://github.com/fastapi/fastapi> |

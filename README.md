@@ -7,7 +7,8 @@
 - 确定性流量引擎：固定 `seed`、场景和 tick 后，结果逐拍一致。
 - SQLite 单文件记录：运行元数据和每个 tick 的快照都可查询，重启会回收中断运行。
 - FastAPI 控制 API：启动、暂停、继续、结束、速率调整和指定 tick 查询。
-- Vue 3 + TypeScript 工作台：Leaflet 本地坐标地图、Canvas 流动粒子、统一时间轴回看。
+- Vue 3 + TypeScript 工作台：deck.gl 本地 XY 城镇渲染、道路热力、人流点、车辆标记和统一时间轴回看。
+- 可复现城镇生成：输入 `generation_seed` 和居民数量，生成有城墙、街区、建筑和功能地标的 v2 场景；留空 seed 时由后端返回随机 seed。
 - 桌面和移动端 Playwright 生命周期测试。
 
 实现路线、数据契约、接口细节和 2.0/3.0 扩展边界见 [`docs/TECHNICAL_ROUTE.md`](docs/TECHNICAL_ROUTE.md)。
@@ -55,7 +56,7 @@ npm --prefix frontend run build
 npm --prefix frontend run test:e2e
 ```
 
-端到端测试会按配置启动后端和前端；若已有 `8000`/`5173` 服务会复用它们。容量验收测试会推进 demo 场景 3600 tick，并检查耗时和数据库体积：
+端到端测试使用隔离的 `18123`/`15174` 端口，后端测试数据库放在临时目录，不触碰开发中的 `8000`/`5173` 服务。容量验收测试会推进 demo 场景 3600 tick，并检查耗时和数据库体积：
 
 ```bash
 uv run pytest backend/tests/test_capacity.py -q
@@ -68,7 +69,7 @@ pyproject.toml / uv.lock     根目录 Python 工具链与锁文件
 backend/app/                 引擎、场景校验、SQLite、运行控制和 HTTP API
 backend/tests/               后端单元/API/容量测试
 scenarios/demo-city/         可提交到 Git 的场景 JSON
-frontend/src/                Vue 工作台、Leaflet 地图和 Canvas 流量层
+frontend/src/                Vue 工作台、deck.gl 城镇图层和生成/回放控制
 frontend/e2e/                桌面/移动端生命周期测试
 scripts/dev.sh               本地一键启动入口
 docs/TECHNICAL_ROUTE.md      可直接照做的实现路径与扩展契约
@@ -79,7 +80,10 @@ docs/TECHNICAL_ROUTE.md      可直接照做的实现路径与扩展契约
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
 | `GET` | `/api/scenarios` | 列出已校验场景 |
-| `POST` | `/api/runs` | 创建运行；body 为 `{"scenario_id":"demo-city","seed":7}` |
+| `GET` | `/api/health` | 查看 EngineHost、SQLite 和场景目录 readiness |
+| `POST` | `/api/scenario-drafts` | 异步生成城镇；body 为 `{"generation_seed":8815907750467,"population":11499}` |
+| `GET` | `/api/scenario-drafts/{id}` | 查询 skeleton/FlowCompiler 状态，ready 时返回完整 bundle |
+| `POST` | `/api/runs` | 创建运行；body 为 `{"scenario_id":"demo-city","simulation_seed":7}` 或 `{"draft_id":"...","simulation_seed":7}` |
 | `GET` | `/api/runs?limit=20` | 历史运行 |
 | `GET` | `/api/runs/{id}?include_scenario=true` | 运行状态和最新快照 |
 | `POST` | `/api/runs/{id}/commands` | `pause`、`resume`、`end` 或 `set_rate` |
@@ -91,7 +95,7 @@ docs/TECHNICAL_ROUTE.md      可直接照做的实现路径与扩展契约
 
 ### 1.0（当前）
 
-完成单城市/单场景的确定性流量、数据库记录、实时查看和同一时间轴回放；保留世界、事件和独立人物的接口，但不提前实现英雄、领袖、商队或大模型调用。
+完成单城镇确定性生成、建筑/城墙/道路渲染、聚合人流与车流热力、数据库记录、实时查看和同一时间轴回放；保留世界、事件和独立人物的接口，但不提前实现英雄、领袖、商队或大模型调用。
 
 ### 2.0
 

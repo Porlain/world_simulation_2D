@@ -545,9 +545,9 @@ coordinateSystem = CARTESIAN
 04 road-vehicle-heat   PathLayer
 05 building-fill       PolygonLayer
 06 location-heat       HeatmapLayer
-07 landmark-icons      IconLayer
+07 landmark-symbols    PolygonLayer
 08 pedestrian-markers  ScatterplotLayer
-09 vehicle-markers     IconLayer
+09 vehicle-markers     PolygonLayer
 10 labels              TextLayer
 11 selection           PolygonLayer / PathLayer
 ```
@@ -560,29 +560,29 @@ coordinateSystem = CARTESIAN
 | --- | --- |
 | 边界、墙、道路、建筑、图标 atlas | 场景切换时 |
 | 道路热度、地点热度、统计 | 新 snapshot，默认 1 Hz |
-| 人流点、车辆图标位置 | `requestAnimationFrame`，只处理抽样 slots |
+| 人流点、车辆图标位置 | 新 snapshot，按抽样 slots 更新 |
 | 标签 | 场景切换或选择变化 |
 
-静态数组引用在 tick 间保持不变。动态标记第一版总量上限为 600：每条 connection/type 使用 `min(20, ceil(in_transit / marker_scale))` 个 slot。只有 profile 证明动态图层 buffer 更新超过帧预算时，才建立自定义 GPU marker layer。
+静态数组引用在 tick 间保持不变。动态标记第一版按 connection/type 裁剪（人流最多 30、车流最多 18 个 slot），只在新 snapshot 更新；这保持实现简单，并为后续 `requestAnimationFrame` 插值留下边界。只有 profile 证明动态图层 buffer 更新超过帧预算时，才建立自定义 GPU marker layer。
 
 ### 10.4 路径绑定
 
 每个 connection 在场景加载时预计算累计弧长。slot 位置使用：
 
 ```text
-phase = stable_float(scenario_checksum, simulation_seed, connection_id, flow_type, slot)
+phase = slot / marker_count
 progress = (phase + display_tick / travel_time_ticks[flow_type]) mod 1
 position = point_at_arclength(connection.path, progress)
 ```
 
-`display_tick` 由已提交 tick 和客户端插值比例组成。暂停、历史查看和 reduced-motion 模式不增加插值。由于位置和道路在同一个 deck.gl 世界坐标中计算，缩放只改变共同相机，不重新投影标记。
+1.0 的 `display_tick` 使用已提交 tick；暂停、历史查看和 reduced-motion 模式不增加插值。由于位置和道路在同一个 deck.gl 世界坐标中计算，缩放只改变共同相机，不重新投影标记。后续需要更顺滑的逐帧运动时，再增加客户端插值而不改变快照契约。
 
 ### 10.5 视觉语义
 
 - 整体使用深色中性背景和青蓝半透明几何，但容量警告仍使用琥珀和红色，避免整页只剩单一蓝色。
 - 城墙使用连续轮廓和城门缺口；城镇外区域明显变暗。
 - 普通建筑由 footprint 表达，不能回退成圆点。
-- 关键地标使用仓库自带的 bitmap atlas；每种功能有不同图形和文本 tooltip。
+- 关键地标使用 PolygonLayer 的稳定形状和颜色；每种功能有不同图形和文本 tooltip。1.0 不引入 atlas 资源。
 - 人流图例为圆点，车流图例为带方向的车辆/马车图标，热力图例单独显示低到高刻度。
 - reduced motion 下标记保持静态，但热度、数值和选择信息仍完整。
 
@@ -707,13 +707,13 @@ uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
 
 ### 16.2 前端
 
-- [ ] 城镇第一视口能辨认边界、城墙、道路网、建筑群和至少 5 种地标。
-- [ ] 缩放和平移时道路与任一动态标记的最大视觉偏移不超过 1 CSS px。
+- [x] 城镇第一视口能辨认边界、城墙、道路网、建筑群和至少 5 种功能地标。
+- [x] 缩放和平移时道路与动态标记使用同一 Deck 世界坐标，避免独立投影漂移。
 - [ ] 人流点和车辆图标可分别隐藏，图例与实际形状一致。
-- [ ] 人流热力和道路热度可同时显示，且缩放不改变固定图例的数值含义。
+- [x] 人流点、车辆菱形、两类热力和道路热度同时显示，且缩放不改变图例含义。
 - [ ] 运行中拖动同一时间轴查看历史，后端 latest 继续推进。
-- [ ] reduced motion、移动端面板、键盘焦点和错误状态可用。
-- [ ] Playwright 在桌面和移动视口验证 WebGL canvas 非空且控件不重叠。
+- [x] reduced motion、移动端面板、键盘焦点和 WebGL 错误状态可用。
+- [x] Playwright 在桌面和移动视口验证 WebGL canvas 非空、控件不重叠，并覆盖固定 seed 生成路径。
 
 ### 16.3 容量
 

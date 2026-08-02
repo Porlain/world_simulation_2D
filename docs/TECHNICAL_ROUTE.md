@@ -1,6 +1,6 @@
 # 技术路径：从流量 Demo 到可生成城镇
 
-> 当前状态：迁移设计已完成，代码仍处于旧 Demo 基线
+> 当前状态：1.0 迁移已落地，当前主线包含可生成城镇、v2 流量快照和 deck.gl 图层
 >
 > 完整设计：[城镇生成、流量仿真与分层渲染架构](superpowers/specs/2026-08-02-town-rendering-engine-architecture-design.md)
 
@@ -14,7 +14,7 @@
 - 固定步长确定性流量引擎。
 - SQLite WAL、每 tick 快照和历史回放。
 - Vue 三栏工作台、统一时间轴和运行控制。
-- Leaflet `CRS.Simple` 道路/地点和独立 Canvas 粒子。
+- deck.gl `OrthographicView` 的本地 XY 城镇、道路和流量图层。
 
 当前代码不是废弃原型。以下部分继续复用：状态机、HTTP 路径、事务边界、时间轴、seeded demand、最大余数分配和自动测试。只迁移限制下一阶段的边界：
 
@@ -218,20 +218,20 @@ Vue 使用 standalone `Deck` 和一个 `OrthographicView`，所有图层使用�
 | 1 | 街区底色 | PolygonLayer | 场景切换 |
 | 2 | 边界、城墙 | PathLayer | 场景切换 |
 | 3 | 道路底图 | PathLayer | 场景切换 |
-| 4 | 车流热度带 | PathLayer | snapshot |
+| 4 | 人流/车流道路热度带 | PathLayer | snapshot |
 | 5 | 建筑 footprint | PolygonLayer | 场景切换 |
 | 6 | 地点人流热力 | HeatmapLayer | snapshot |
-| 7 | 功能地标 | IconLayer | 场景切换 |
-| 8 | 人流采样 | ScatterplotLayer | animation frame |
-| 9 | 车辆采样 | IconLayer | animation frame |
+| 7 | 功能地标 | PolygonLayer + TextLayer | 场景切换/选择 |
+| 8 | 人流采样 | ScatterplotLayer | snapshot tick |
+| 9 | 车辆采样 | PolygonLayer | snapshot tick |
 | 10 | 标签、选择 | Text/Polygon/Path | 选择变化 |
 
 实现规则：
 
 - 静态 geometry 数组在 tick 间保持同一引用。
-- `HeatmapLayer` 使用固定 `colorDomain`，图例不会随缩放改变含义。
+- `HeatmapLayer` 使用固定颜色范围，图例不会随缩放改变含义。
 - 道路热度复用 street path，不把车流扩散到建筑上。
-- 动态 marker 最多 600 个；每条 connection/type 最多 20 个抽样 slot。
+- 动态 marker 最多约 1,000 个；每条 connection/type 按流量上限抽样 slot，并在前端按固定公式裁剪。
 - marker 位置通过 path 累计弧长插值，和道路处于同一个 Deck 世界坐标。
 - 首版不写 custom WebGL layer；只有 profile 证明 buffer 上传超预算后升级。
 - WebGL 初始化失败时控制、统计和后端运行仍可用。
@@ -293,18 +293,18 @@ npm run test:e2e
 
 ## 9. 小模块与提交边界
 
-| 顺序 | 模块 | 最小验证 |
-| --- | --- | --- |
-| 0 | 文档基线 | 链接、占位符、矛盾和 diff 检查 |
-| 1 | 根 pyproject/uv.lock | 当前后端测试全通过 |
-| 2 | TownSkeleton + radial-v1 | 同 seed checksum、不同 seed、人口守恒 |
-| 3 | FlowCompiler + draft API | 引用连续、API 202/status/422、bundle checksum |
-| 4 | SimulationState/FlowSnapshot v2 | 100 tick 确定性、v1 adapter、公开守恒 |
-| 5 | EngineHost | idle/readiness、激活、暂停、关闭测试 |
-| 6 | 静态 deck.gl 城镇 | typecheck/build、桌面/移动 canvas 非空 |
-| 7 | 热力和动态 marker | 分图例、缩放无漂移、reduced motion |
-| 8 | 生成控件和时间轴整合 | Playwright 完整 run/replay 流程 |
-| 9 | 容量与开源交付 | 2000 建筑 fixture、README、第三方声明 |
+| 顺序 | 模块 | 最小验证 | 状态 |
+| --- | --- | --- | --- |
+| 0 | 文档基线 | 链接、占位符、矛盾和 diff 检查 | 已完成 |
+| 1 | 根 pyproject/uv.lock | 当前后端测试全通过 | 已完成 |
+| 2 | TownSkeleton + radial-v1 | 同 seed checksum、不同 seed、人口守恒 | 已完成 |
+| 3 | FlowCompiler + draft API | 引用连续、API 202/status/422、bundle checksum | 已完成 |
+| 4 | SimulationState/FlowSnapshot v2 | 100 tick 确定性、v1 adapter、公开守恒 | 已完成 |
+| 5 | EngineHost | idle/readiness、激活、暂停、关闭测试 | 已完成 |
+| 6 | 静态 deck.gl 城镇 | typecheck/build、桌面/移动 canvas 非空 | 已完成 |
+| 7 | 热力和动态 marker | 分图例、缩放无漂移、reduced motion | 已完成 |
+| 8 | 生成控件和时间轴整合 | Playwright 完整 run/replay 流程 | 已完成 |
+| 9 | 容量与开源交付 | 2000 建筑 fixture、README、第三方声明 | 开源文档完成，容量待测 |
 
 每一行单独提交并推送；检查失败时不进入下一行。不得把格式化、无关重构或生成产物混入模块提交。
 
@@ -312,7 +312,7 @@ npm run test:e2e
 
 ### 10.1 1.0
 
-完成单城镇生成、聚合人流/车流、热力、回放和可复现运行。运行时模型从第一天就兼容 importer 输出，但不创建空 importer 抽象。
+完成单城镇生成、聚合人流/车流、热力、回放和可复现运行。运行时模型从第一天就兼容 importer 输出，但不创建空 importer 抽象。Watabou 风格当前通过 `radial-v1` 的可替换 skeleton 契约实现，后续导入器只需输出同一结构。
 
 ### 10.2 1.1
 

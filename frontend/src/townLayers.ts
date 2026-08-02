@@ -462,6 +462,7 @@ function heatLayer(
     radiusPixels: 26,
     intensity: 1.25,
     threshold: 0.035,
+    colorDomain: [0, 4],
     colorRange,
     pickable: false,
   });
