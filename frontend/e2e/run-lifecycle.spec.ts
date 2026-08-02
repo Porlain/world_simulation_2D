@@ -28,12 +28,13 @@ test("runs, pauses, seeks, and ends a city simulation", async ({ page }, testInf
     timeout: 15_000,
   }).toBeGreaterThanOrEqual(2);
 
-  const drawn = await page.locator("canvas.flow-canvas").evaluate((canvas: HTMLCanvasElement) => {
-    const context = canvas.getContext("2d");
+  const drawn = await page.locator("canvas#deckgl-overlay").evaluate((canvas: HTMLCanvasElement) => {
+    const context = canvas.getContext("webgl2");
     if (!context || canvas.width === 0 || canvas.height === 0) return false;
-    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-    for (let index = 3; index < pixels.length; index += 4) {
-      if (pixels[index] !== 0) return true;
+    const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+    context.readPixels(0, 0, canvas.width, canvas.height, context.RGBA, context.UNSIGNED_BYTE, pixels);
+    for (let index = 0; index < pixels.length; index += 4) {
+      if (pixels[index] !== 0 || pixels[index + 1] !== 0 || pixels[index + 2] !== 0) return true;
     }
     return false;
   });

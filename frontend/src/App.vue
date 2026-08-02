@@ -359,6 +359,7 @@ onUnmounted(clearTimers);
           :snapshot="displayedSnapshot"
           :run-rate="runRate"
           :running="selectedRun?.status === 'running' && followingLatest"
+          :selected-feature-id="selectedFeatureId"
           @select-feature="selectedFeatureId = $event"
         />
         <div v-if="loading" class="map-loading" role="status"><span class="loading-pip"></span>正在同步</div>

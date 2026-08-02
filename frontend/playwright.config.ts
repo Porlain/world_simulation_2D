@@ -6,7 +6,7 @@ export default defineConfig({
   workers: 1,
   reporter: "line",
   use: {
-    baseURL: "http://127.0.0.1:5173",
+    baseURL: "http://127.0.0.1:15174",
     trace: "retain-on-failure",
   },
   projects: [
@@ -22,15 +22,15 @@ export default defineConfig({
   webServer: [
     {
       command:
-        "FLOW_DB_PATH=../data/e2e.sqlite3 ../.venv/bin/uvicorn app.main:app --app-dir ../backend --host 127.0.0.1 --port 8000",
-      url: "http://127.0.0.1:8000/api/scenarios",
+        "FLOW_DB_PATH=/tmp/world-simulation-2d-e2e-$(date +%s%N).sqlite3 ../.venv/bin/uvicorn app.main:app --app-dir ../backend --host 127.0.0.1 --port 18123",
+      url: "http://127.0.0.1:18123/api/health",
       reuseExistingServer: true,
       timeout: 120_000,
     },
     {
-      command: "npm run dev",
-      url: "http://127.0.0.1:5173",
-      reuseExistingServer: true,
+      command: "VITE_PORT=15174 VITE_API_TARGET=http://127.0.0.1:18123 npm run dev -- --force",
+      url: "http://127.0.0.1:15174",
+      reuseExistingServer: false,
       timeout: 120_000,
     },
   ],

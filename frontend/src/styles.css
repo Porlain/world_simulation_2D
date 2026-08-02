@@ -226,35 +226,48 @@ h1 span { color: #a9c9ba; font-size: 12px; font-weight: 400; }
 .rail-error, .stats-alert { gap: 8px; padding: 12px 18px; color: var(--danger); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
 .rail-error { border-bottom: 1px solid var(--paper-line); }
 
-.map-workspace { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--charcoal-soft); }
-.city-map { position: absolute; inset: 0; min-width: 0; min-height: 0; overflow: hidden; background: #293633; }
-.city-map .leaflet-container { width: 100%; height: 100%; background: #293633; font-family: inherit; }
-.city-map .leaflet-control-zoom { margin: 16px; border: 1px solid #6c786f; border-radius: 3px; box-shadow: none; }
-.city-map .leaflet-control-zoom a { color: #eee6d7; background: #303e39; border-color: #6c786f; }
-.city-map .leaflet-control-zoom a:hover { color: var(--ochre); background: #3c4a44; }
-.city-map .leaflet-tooltip { color: #f5ecdc; background: #202827; border: 1px solid #6c786f; border-radius: 2px; box-shadow: var(--shadow); }
-.city-map .leaflet-tooltip-top::before { border-top-color: #6c786f; }
-.flow-canvas { position: absolute; inset: 0; z-index: 450; pointer-events: none; }
-.map-legend, .map-stamp, .map-loading {
+.map-workspace { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #07151b; }
+.city-map {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background-color: #07151b;
+  background-image:
+    linear-gradient(rgb(79 178 194 / 7%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(79 178 194 / 7%) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+.city-map::after { position: absolute; inset: 0; z-index: 2; border: 1px solid rgb(85 207 220 / 15%); content: ""; pointer-events: none; }
+.city-map canvas { position: absolute !important; inset: 0; z-index: 1; outline: none; }
+.map-legend, .map-stamp, .map-loading, .map-source, .map-render-error {
   position: absolute;
   z-index: 600;
-  color: #e7dfd1;
-  background: rgb(32 40 39 / 88%);
-  border: 1px solid #5d6c64;
+  color: #d8eef0;
+  background: rgb(5 22 30 / 88%);
+  border: 1px solid rgb(84 196 208 / 45%);
   border-radius: 2px;
-  box-shadow: 0 6px 16px rgb(0 0 0 / 13%);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 24%);
 }
 
 .map-legend { right: 16px; bottom: 16px; display: flex; gap: 13px; padding: 8px 10px; font-size: 10px; }
 .map-legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.legend-line { display: inline-block; width: 14px; height: 3px; }
+.legend-line--wall { background: #58dce8; }
+.legend-line--road { height: 2px; background: #4eabbf; }
+.legend-building { width: 9px; height: 9px; background: rgb(32 169 197 / 72%); border: 1px solid #78d5df; }
+.legend-landmark { width: 9px; height: 9px; background: #efc35c; border: 1px solid #f7e2a8; transform: rotate(45deg); }
 .legend-dot { width: 7px; height: 7px; border-radius: 50%; }
 .legend-dot--clear { background: #9cc4b8; }
 .legend-dot--busy { background: #d4a445; }
 .legend-dot--full { background: #d56443; }
-.map-stamp { top: 16px; left: 16px; padding: 8px 10px; color: var(--ochre); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; }
+.map-stamp { top: 16px; left: 16px; padding: 8px 10px; color: #efbd51; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; }
+.map-source { top: 16px; left: 90px; padding: 8px 9px; color: #7ed7df; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
 .map-loading { top: 16px; right: 16px; display: flex; align-items: center; gap: 7px; padding: 8px 10px; font-size: 10px; }
+.map-render-error { top: 56px; left: 16px; max-width: min(420px, calc(100% - 32px)); padding: 9px 11px; color: #ffb2a5; border-color: rgb(223 96 76 / 70%); font-size: 11px; overflow-wrap: anywhere; }
 .loading-pip { width: 7px; height: 7px; background: var(--ochre); border-radius: 50%; animation: blink 900ms steps(2, end) infinite; }
-.map-empty { position: absolute; inset: 0; z-index: 700; display: grid; place-items: center; color: #b7c2b8; font-family: Georgia, serif; font-size: 18px; pointer-events: none; }
+.map-empty { position: absolute; inset: 0; z-index: 700; display: grid; place-items: center; color: #8bb5bb; font-family: Georgia, serif; font-size: 18px; pointer-events: none; }
 
 .stats-heading { padding-top: 22px; }
 .stats-heading .section-kicker { margin-bottom: 18px; }

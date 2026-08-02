@@ -45,6 +45,84 @@ export interface ScenarioConfig {
 export interface ScenarioBundle {
   config: ScenarioConfig;
   checksum: string;
+  town_skeleton?: TownSkeleton;
+  simulation_package?: SimulationPackage;
+  bundle_checksum?: string;
+}
+
+export type DistrictKind = "residential" | "market" | "industrial" | "storage" | "religious" | "civic" | "military" | "stable";
+export type BuildingKind = "residential" | "market" | "workshop" | "storage" | "religious" | "administrative" | "military" | "stable";
+
+export interface TownDistrict {
+  id: string;
+  kind: DistrictKind;
+  polygon: Coordinate[];
+}
+
+export interface TownBuilding {
+  id: string;
+  district_id: string;
+  kind: BuildingKind;
+  polygon: Coordinate[];
+  anchor: Coordinate;
+}
+
+export interface TownJunction {
+  id: string;
+  position: Coordinate;
+  kind: "normal" | "gate" | "plaza";
+}
+
+export interface TownStreet {
+  id: string;
+  from_junction_id: string;
+  to_junction_id: string;
+  path: Coordinate[];
+  width: number;
+  kind: "primary" | "ring" | "secondary";
+}
+
+export interface TownLandmark {
+  id: string;
+  building_id: string | null;
+  kind: "gate" | "plaza" | BuildingKind;
+  name: string;
+  position: Coordinate;
+}
+
+export interface TownSkeleton {
+  schema_version: 2;
+  scenario_id: string;
+  name: string;
+  generation_seed: number;
+  generator_version: "radial-v1";
+  requested_population: number;
+  initial_vehicle_count: number;
+  coordinate_system: "local_xy";
+  coordinate_unit: "meter";
+  axis_orientation: "x_right_y_up";
+  bounds: readonly [number, number, number, number];
+  boundary: Coordinate[];
+  districts: TownDistrict[];
+  buildings: TownBuilding[];
+  junctions: TownJunction[];
+  streets: TownStreet[];
+  landmarks: TownLandmark[];
+}
+
+export interface SimulationPackage {
+  schema_version: 2;
+  tick_seconds: 1;
+  flow_types: FlowTypeConfig[];
+  locations: Array<LocationConfig & { kind: "gate" | "plaza" | "landmark" | "district" }>;
+  connections: Array<Omit<ConnectionConfig, "travel_time_ticks"> & {
+    street_segment_ids: string[];
+    travel_time_ticks: Record<string, number>;
+  }>;
+  bindings: {
+    location_feature_ids: Record<string, string[]>;
+    connection_street_ids: Record<string, string[]>;
+  };
 }
 
 export interface ConnectionActivity {
