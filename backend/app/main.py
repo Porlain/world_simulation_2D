@@ -14,7 +14,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .models import RunCommandRequest, RunCreateRequest
+from .drafts import DraftCapacityReached, DraftManager, DraftNotFound
+from .models import RunCommandRequest, RunCreateRequest, TownGenerationRequest
 from .runs import RunController, RunNotActive, ScenarioNotFound
 from .scenario import ScenarioCatalog, ScenarioValidationError
 from .storage import (
@@ -25,6 +26,7 @@ from .storage import (
     Storage,
     StorageError,
 )
+from .town import TownGenerationError
 
 
 def _project_root() -> Path:
@@ -101,13 +103,16 @@ def create_app(
         await asyncio.to_thread(storage.recover_interrupted_runs)
         catalog = await asyncio.to_thread(ScenarioCatalog.load_all, resolved_scenarios)
         controller = RunController(storage, catalog)
+        drafts = DraftManager()
         await controller.start_scheduler()
         application.state.storage = storage
         application.state.catalog = catalog
         application.state.controller = controller
+        application.state.drafts = drafts
         try:
             yield
         finally:
+            await drafts.close()
             await controller.stop_scheduler()
 
     application = FastAPI(title="World Simulation 2D API", lifespan=lifespan)
@@ -120,6 +125,18 @@ def create_app(
     @application.exception_handler(ScenarioValidationError)
     async def scenario_error_handler(_: Request, exception: ScenarioValidationError):
         return _error("scenario_invalid", str(exception), 500)
+
+    @application.exception_handler(TownGenerationError)
+    async def town_generation_error_handler(_: Request, exception: TownGenerationError):
+        return _error("scenario_generation_failed", str(exception), 500)
+
+    @application.exception_handler(DraftNotFound)
+    async def draft_not_found_handler(_: Request, exception: DraftNotFound):
+        return _error("draft_not_found", "Scenario draft not found.", 404, {"draft_id": str(exception)})
+
+    @application.exception_handler(DraftCapacityReached)
+    async def draft_capacity_handler(_: Request, exception: DraftCapacityReached):
+        return _error("draft_capacity_reached", str(exception), 429)
 
     @application.exception_handler(ScenarioNotFound)
     async def scenario_not_found_handler(_: Request, exception: ScenarioNotFound):
@@ -153,6 +170,17 @@ def create_app(
     async def list_scenarios(request: Request):
         controller: RunController = request.app.state.controller
         return {"items": [_scenario_payload(scenario) for scenario in await controller.list_scenarios()]}
+
+    @application.post("/api/scenario-drafts", status_code=202)
+    async def create_scenario_draft(payload: TownGenerationRequest, request: Request):
+        drafts: DraftManager = request.app.state.drafts
+        draft = await drafts.create(payload)
+        return draft.payload()
+
+    @application.get("/api/scenario-drafts/{draft_id}")
+    async def get_scenario_draft(draft_id: str, request: Request):
+        drafts: DraftManager = request.app.state.drafts
+        return (await drafts.get(draft_id)).payload()
 
     @application.post("/api/runs", status_code=201)
     async def create_run(payload: RunCreateRequest, request: Request):
