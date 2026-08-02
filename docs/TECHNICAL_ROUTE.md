@@ -304,7 +304,7 @@ npm run test:e2e
 | 6 | 静态 deck.gl 城镇 | typecheck/build、桌面/移动 canvas 非空 | 已完成 |
 | 7 | 热力和动态 marker | 分图例、缩放无漂移、reduced motion | 已完成 |
 | 8 | 生成控件和时间轴整合 | Playwright 完整 run/replay 流程 | 已完成 |
-| 9 | 容量与开源交付 | 2000 建筑 fixture、README、第三方声明 | 开源文档完成，容量待测 |
+| 9 | 容量与开源交付 | 2000 建筑 fixture、README、第三方声明 | 已完成 |
 
 每一行单独提交并推送；检查失败时不进入下一行。不得把格式化、无关重构或生成产物混入模块提交。
 
