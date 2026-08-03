@@ -58,10 +58,10 @@ function start() {
 function generateTown() {
   const population = Number(populationInput.value);
   const seedText = generationSeedInput.value.trim();
-  const generationSeed = seedText === "" ? undefined : Number(seedText);
+  const generationSeed = seedText === "" ? Math.floor(Math.random() * 9_007_199_254_740_991) : Number(seedText);
   if (!Number.isSafeInteger(population) || population < 100 || population > 100_000) return;
-  if (generationSeed !== undefined && (!Number.isSafeInteger(generationSeed) || generationSeed < 0)) return;
-  emit("generate-town", { population, ...(generationSeed === undefined ? {} : { generationSeed }) });
+  if (!Number.isSafeInteger(generationSeed) || generationSeed < 0) return;
+  emit("generate-town", { population, generationSeed });
 }
 
 function statusLabel(status: RunRecord["status"]): string {

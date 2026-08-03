@@ -7,6 +7,7 @@ import {
   createDynamicTownLayers,
   createStaticTownLayers,
   type TownFeature,
+  type TownFlowRoad,
   type TownLayerVisibility,
   type TownRenderData,
 } from "./townLayers";
@@ -42,6 +43,19 @@ function niceScale(rawDistance: number): number {
 const scaleDistance = computed(() => niceScale(110 * 2 ** -viewZoom.value));
 const scaleLabel = computed(() => scaleDistance.value >= 1000 ? `${(scaleDistance.value / 1000).toFixed(scaleDistance.value >= 10_000 ? 0 : 1)} km` : `${Math.round(scaleDistance.value)} m`);
 const scaleWidth = computed(() => Math.max(48, Math.min(140, 110 * scaleDistance.value / (110 * 2 ** -viewZoom.value))));
+
+function tooltipText(object: TownFeature): string {
+  if (object.kind === "flow-road") {
+    const road = object as TownFlowRoad;
+    return [
+      `道路 ${road.id}`,
+      `人流：${Math.round(road.peopleCount).toLocaleString("zh-CN")} 人在途`,
+      `车流：${Math.round(road.vehicleCount).toLocaleString("zh-CN")} 辆在途`,
+      `累计出发：${Math.round(road.peopleDeparted).toLocaleString("zh-CN")} 人 / ${Math.round(road.vehicleDeparted).toLocaleString("zh-CN")} 辆`,
+    ].join("\n");
+  }
+  return object.name;
+}
 
 function fittedViewState(data: TownRenderData) {
   const host = mapHost.value?.getBoundingClientRect();
@@ -91,7 +105,7 @@ onMounted(async () => {
       if (typeof viewState.zoom === "number") viewZoom.value = viewState.zoom;
     },
     getTooltip: ({ object }: PickingInfo<TownFeature>) => object ? {
-      text: object.name,
+      text: tooltipText(object),
       style: {
         color: "#3f3b38",
         backgroundColor: "rgba(237, 233, 222, 0.96)",

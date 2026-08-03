@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { AlertTriangle, Menu, X } from "lucide-vue-next";
+import { AlertTriangle, X } from "lucide-vue-next";
 import ControlRail from "./ControlRail.vue";
 import CityMap from "./CityMap.vue";
 import PlaybackTimeline from "./PlaybackTimeline.vue";
@@ -36,8 +36,6 @@ const followingLatest = ref(true);
 const playbackPlaying = ref(false);
 const loading = ref(false);
 const error = ref<ApiError | null>(null);
-const menuDialog = ref<HTMLDialogElement | null>(null);
-const menuOpen = ref(false);
 const selectedFeatureId = ref<string | null>(null);
 const draft = ref<ScenarioDraft | null>(null);
 const generationLoading = ref(false);
@@ -157,7 +155,6 @@ async function selectScenario(scenarioId: string) {
   selectedFeatureId.value = null;
   latestSnapshot.value = null;
   displayedSnapshot.value = null;
-  closeMenu();
 }
 
 async function pollDraft(draftId: string) {
@@ -199,7 +196,6 @@ async function generateTown(payload: { generationSeed?: number; population: numb
       ...(payload.generationSeed === undefined ? {} : { generation_seed: payload.generationSeed }),
     });
     draft.value = created;
-    closeMenu();
     if (created.compile_status === "ready" && created.bundle) {
       selectedBundle.value = created.bundle;
       generationLoading.value = false;
@@ -227,7 +223,6 @@ async function startRun(seed?: number) {
     updateFromDetail(detail);
     await refreshRuns();
     schedulePoll();
-    closeMenu();
   } catch (cause) {
     error.value = normalizeError(cause);
   } finally {
@@ -249,7 +244,6 @@ async function selectRun(runId: string) {
     selectedScenarioId.value = detail.run.scenario_id;
     selectedFeatureId.value = null;
     if (detail.run.status === "running" || detail.run.status === "paused") schedulePoll();
-    closeMenu();
   } catch (cause) {
     error.value = normalizeError(cause);
   } finally {
@@ -378,20 +372,6 @@ async function playNext() {
   }
 }
 
-function openMenu() {
-  if (!menuDialog.value?.open) menuDialog.value?.showModal();
-  menuOpen.value = true;
-}
-
-function closeMenu() {
-  if (menuDialog.value?.open) menuDialog.value.close();
-  menuOpen.value = false;
-}
-
-function closeMenuFromBackdrop(event: MouseEvent) {
-  if (event.target === menuDialog.value) closeMenu();
-}
-
 function toggleLayer(layer: keyof TownLayerVisibility) {
   layerVisibility.value[layer] = !layerVisibility.value[layer];
 }
@@ -415,7 +395,6 @@ function statusLabel(status: RunRecord["status"] | null): string {
 onMounted(loadInitial);
 onUnmounted(() => {
   clearTimers();
-  closeMenu();
 });
 </script>
 
@@ -444,10 +423,6 @@ onUnmounted(() => {
             <span v-if="selectedBundle?.town_skeleton">SEED {{ selectedBundle.town_skeleton.generation_seed }}</span>
           </p>
         </div>
-        <button class="menu-button" type="button" aria-label="打开 Menu" title="打开 Menu" @click="openMenu">
-          <Menu :size="15" aria-hidden="true" />
-          <span>Menu</span>
-        </button>
       </header>
 
       <div class="topbar-readout" aria-live="polite">
@@ -455,7 +430,7 @@ onUnmounted(() => {
       </div>
       <div v-if="loading" class="map-loading" role="status"><span class="loading-pip"></span>正在同步</div>
 
-      <aside v-if="selectedFeatureId && !menuOpen" class="map-inspector" aria-label="当前选中对象">
+      <aside v-if="selectedFeatureId" class="map-inspector" aria-label="当前选中对象">
         <div class="inspector-heading">
           <div>
             <div class="section-kicker">当前焦点</div>
@@ -476,18 +451,14 @@ onUnmounted(() => {
         </dl>
       </aside>
 
-      <dialog ref="menuDialog" class="menu-dialog" aria-labelledby="menu-title" @close="menuOpen = false" @click="closeMenuFromBackdrop">
-        <div class="menu-drawer">
-          <header class="drawer-header">
-            <div>
-              <p>WORLD SIMULATION / 01</p>
-              <h2 id="menu-title">Menu</h2>
-            </div>
-            <button class="icon-button" type="button" aria-label="关闭 Menu" title="关闭 Menu" @click.stop="closeMenu">
-              <X :size="18" aria-hidden="true" />
-            </button>
-          </header>
-          <div class="drawer-scroll">
+      <aside class="menu-drawer" aria-label="Menu">
+        <header class="drawer-header">
+          <div>
+            <p>WORLD SIMULATION / 01</p>
+            <h2 id="menu-title">Menu</h2>
+          </div>
+        </header>
+        <div class="drawer-scroll">
             <ControlRail
               :scenarios="scenarios"
               :selected-scenario-id="selectedScenarioId"
@@ -523,9 +494,8 @@ onUnmounted(() => {
               <AlertTriangle :size="16" aria-hidden="true" />
               <span>{{ selectedRun.error_message }}</span>
             </div>
-          </div>
         </div>
-      </dialog>
+      </aside>
     </main>
 
     <PlaybackTimeline

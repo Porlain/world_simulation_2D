@@ -52,10 +52,14 @@ const allLayersVisible: TownLayerVisibility = {
   heat: true,
 };
 
-interface FlowRoad extends TownFeature {
+export interface TownFlowRoad extends TownFeature {
   path: Coordinate[];
   peopleRatio: number;
   vehicleRatio: number;
+  peopleCount: number;
+  vehicleCount: number;
+  peopleDeparted: number;
+  vehicleDeparted: number;
 }
 
 interface FlowPoint {
@@ -73,7 +77,7 @@ interface FlowMarker extends TownFeature {
 export interface TownFlowRenderData {
   peopleHeat: FlowPoint[];
   vehicleHeat: FlowPoint[];
-  roads: FlowRoad[];
+  roads: TownFlowRoad[];
   peopleMarkers: FlowMarker[];
   vehicleMarkers: FlowMarker[];
 }
@@ -408,7 +412,7 @@ export function createStaticTownLayers(
     }),
     new TextLayer<TownFeature>({
       id: "landmark-labels",
-      data: data.landmarks.filter((feature) => feature.kind === "gate" || feature.kind === "plaza" || feature.id === selectedFeatureId),
+      data: data.landmarks,
       ...common,
       pickable: false,
       billboard: true,
@@ -516,7 +520,7 @@ export function assembleTownFlowData(
   const connections = flowConnections(bundle);
   const peopleHeat: FlowPoint[] = [];
   const vehicleHeat: FlowPoint[] = [];
-  const roads: FlowRoad[] = [];
+  const roads: TownFlowRoad[] = [];
   const peopleMarkers: FlowMarker[] = [];
   const vehicleMarkers: FlowMarker[] = [];
   const locationEntries = flowLocations(bundle);
@@ -542,6 +546,10 @@ export function assembleTownFlowData(
       path: connection.path,
       peopleRatio,
       vehicleRatio,
+      peopleCount: peopleFlow.inTransit,
+      vehicleCount: vehicleFlow.inTransit,
+      peopleDeparted: peopleFlow.departed,
+      vehicleDeparted: vehicleFlow.departed,
     });
 
     for (let sample = 0; sample < 7; sample += 1) {
@@ -557,7 +565,7 @@ export function assembleTownFlowData(
         const point = pathPoint(connection.path, progress);
         target.push({
           id: `${connection.id}-${flow}-${index}`,
-          name: flow === "vehicle" ? "车流" : "人流",
+          name: flow === "vehicle" ? `车流 · ${Math.round(count)} 辆在途` : `人流 · ${Math.round(count)} 人在途`,
           kind: flow,
           position: point.position,
           path: connection.path,
@@ -604,6 +612,18 @@ export function createDynamicTownLayers(
   const data = assembleTownFlowData(bundle, snapshot, tickProgress ?? snapshot.tick);
   const common = { coordinateSystem: COORDINATE_SYSTEM.CARTESIAN } as const;
   return [
+    ...(visibility.roads || visibility.people || visibility.vehicles ? [new PathLayer<TownFlowRoad>({
+      id: "flow-road-hit-target",
+      data: data.roads,
+      ...common,
+      pickable: true,
+      widthUnits: "pixels",
+      capRounded: true,
+      jointRounded: true,
+      getPath: (road) => road.path,
+      getColor: [0, 0, 0, 0],
+      getWidth: 12,
+    })] : []),
     ...(visibility.heat && data.peopleHeat.length ? [heatLayer("people-heat", data.peopleHeat, [
       [33, 132, 153, 0],
       [36, 196, 187, 72],
@@ -616,28 +636,28 @@ export function createDynamicTownLayers(
       [126, 111, 224, 168],
       [231, 72, 113, 220],
     ])] : []),
-    ...(visibility.people ? [new PathLayer<FlowRoad>({
+    ...(visibility.people ? [new PathLayer<TownFlowRoad>({
       id: "people-flow-roads",
-      data: data.roads.filter((road) => road.peopleRatio > 0),
+      data: data.roads,
       ...common,
-      pickable: true,
       widthUnits: "pixels",
       capRounded: true,
       jointRounded: true,
       getPath: (road) => road.path!,
-      getColor: (road) => [47 + Math.round(145 * road.peopleRatio), 117 - Math.round(48 * road.peopleRatio), 111 - Math.round(42 * road.peopleRatio), 105 + Math.round(110 * road.peopleRatio)],
+      pickable: false,
+      getColor: (road) => [47 + Math.round(145 * road.peopleRatio), 117 - Math.round(48 * road.peopleRatio), 111 - Math.round(42 * road.peopleRatio), road.peopleRatio > 0 ? 105 + Math.round(110 * road.peopleRatio) : 0],
       getWidth: (road) => 2 + road.peopleRatio * 5,
     })] : []),
-    ...(visibility.vehicles ? [new PathLayer<FlowRoad>({
+    ...(visibility.vehicles ? [new PathLayer<TownFlowRoad>({
       id: "vehicle-flow-roads",
-      data: data.roads.filter((road) => road.vehicleRatio > 0),
+      data: data.roads,
       ...common,
-      pickable: true,
       widthUnits: "pixels",
       capRounded: true,
       jointRounded: true,
       getPath: (road) => road.path!,
-      getColor: (road) => [73 + Math.round(155 * road.vehicleRatio), 124 - Math.round(65 * road.vehicleRatio), 166 - Math.round(72 * road.vehicleRatio), 100 + Math.round(120 * road.vehicleRatio)],
+      pickable: false,
+      getColor: (road) => [73 + Math.round(155 * road.vehicleRatio), 124 - Math.round(65 * road.vehicleRatio), 166 - Math.round(72 * road.vehicleRatio), road.vehicleRatio > 0 ? 100 + Math.round(120 * road.vehicleRatio) : 0],
       getWidth: (road) => 1.5 + road.vehicleRatio * 4,
     })] : []),
     ...(visibility.people ? [new ScatterplotLayer<FlowMarker>({
