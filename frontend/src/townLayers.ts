@@ -54,6 +54,7 @@ const allLayersVisible: TownLayerVisibility = {
 
 export interface TownFlowRoad extends TownFeature {
   path: Coordinate[];
+  routeCount: number;
   peopleRatio: number;
   vehicleRatio: number;
   peopleCount: number;
@@ -436,6 +437,7 @@ export function createStaticTownLayers(
 type FlowConnection = {
   id: string;
   path: Coordinate[];
+  streetIds: string[];
   capacity: Record<string, number>;
   travelTime: Record<string, number>;
 };
@@ -445,6 +447,7 @@ function flowConnections(bundle: ScenarioBundle): FlowConnection[] {
     return bundle.simulation_package.connections.map((connection) => ({
       id: connection.id,
       path: connection.path,
+      streetIds: connection.street_segment_ids,
       capacity: connection.capacity_per_tick,
       travelTime: connection.travel_time_ticks,
     }));
@@ -452,8 +455,9 @@ function flowConnections(bundle: ScenarioBundle): FlowConnection[] {
   return bundle.config.connections.map((connection) => ({
     id: connection.id,
     path: connection.path,
+    streetIds: [connection.id],
     capacity: connection.capacity_per_tick,
-    travelTime: { [bundle.config.flow_types[0]?.id ?? "citizen"]: connection.travel_time_ticks },
+    travelTime: Object.fromEntries(bundle.config.flow_types.map((flow) => [flow.id, connection.travel_time_ticks])),
   }));
 }
 
@@ -499,6 +503,58 @@ function flowRatio(flow: { inTransit: number; departed: number; arrived: number 
   const occupancyRatio = flow.inTransit / Math.max(1, capacity * travelTime);
   const tickThroughputRatio = Math.max(flow.departed, flow.arrived) / Math.max(1, capacity);
   return Math.min(1, Math.max(occupancyRatio, tickThroughputRatio));
+}
+
+function aggregatePhysicalRoads(
+  bundle: ScenarioBundle,
+  routes: TownFlowRoad[],
+  connections: FlowConnection[],
+): TownFlowRoad[] {
+  if (!bundle.town_skeleton) return routes;
+  const streets = new Map(bundle.town_skeleton.streets.map((street) => [street.id, street]));
+  const dominantLoads = new Map<string, number>();
+  const aggregated = new Map<string, TownFlowRoad>();
+
+  for (const street of streets.values()) {
+    aggregated.set(street.id, {
+      id: street.id,
+      name: street.kind,
+      kind: "flow-road",
+      path: street.path,
+      routeCount: 0,
+      peopleRatio: 0,
+      vehicleRatio: 0,
+      peopleCount: 0,
+      vehicleCount: 0,
+      peopleDeparted: 0,
+      vehicleDeparted: 0,
+      peopleArrived: 0,
+      vehicleArrived: 0,
+    });
+  }
+
+  routes.forEach((route, index) => {
+    const load = route.peopleCount + route.vehicleCount;
+    for (const streetId of new Set(connections[index].streetIds)) {
+      const road = aggregated.get(streetId);
+      if (!road) continue;
+      road.routeCount += 1;
+      road.peopleRatio = Math.min(1, road.peopleRatio + route.peopleRatio);
+      road.vehicleRatio = Math.min(1, road.vehicleRatio + route.vehicleRatio);
+      road.peopleCount += route.peopleCount;
+      road.vehicleCount += route.vehicleCount;
+      road.peopleDeparted += route.peopleDeparted;
+      road.vehicleDeparted += route.vehicleDeparted;
+      road.peopleArrived += route.peopleArrived;
+      road.vehicleArrived += route.vehicleArrived;
+      if (!dominantLoads.has(streetId) || load > dominantLoads.get(streetId)!) {
+        dominantLoads.set(streetId, load);
+        road.sourceId = route.id;
+      }
+    }
+  });
+
+  return [...aggregated.values()];
 }
 
 function flowLocationCount(snapshot: SnapshotState, locationId: string, flowId: string): number {
@@ -550,6 +606,7 @@ export function assembleTownFlowData(
       name: connection.id,
       kind: "flow-road",
       path: connection.path,
+      routeCount: 1,
       peopleRatio,
       vehicleRatio,
       peopleCount: peopleFlow.inTransit,
@@ -586,7 +643,7 @@ export function assembleTownFlowData(
     if (people) addMarkers("people", peopleFlow.inTransit, connection.travelTime[people] ?? 1, peopleMarkers);
     if (vehicle) addMarkers("vehicle", vehicleFlow.inTransit, connection.travelTime[vehicle] ?? 1, vehicleMarkers);
   }
-  return { peopleHeat, vehicleHeat, roads, peopleMarkers, vehicleMarkers };
+  return { peopleHeat, vehicleHeat, roads: aggregatePhysicalRoads(bundle, roads, connections), peopleMarkers, vehicleMarkers };
 }
 
 function heatLayer(
