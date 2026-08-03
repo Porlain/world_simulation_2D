@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Activity, AlertTriangle, ChevronDown, Menu, X } from "lucide-vue-next";
+import { AlertTriangle, Menu, X } from "lucide-vue-next";
 import ControlRail from "./ControlRail.vue";
 import CityMap from "./CityMap.vue";
 import PlaybackTimeline from "./PlaybackTimeline.vue";
@@ -24,8 +24,6 @@ import {
   type SnapshotState,
 } from "./api";
 
-type MobilePanel = "controls" | "stats" | null;
-
 const scenarios = ref<ScenarioBundle[]>([]);
 const recentRuns = ref<RunRecord[]>([]);
 const selectedScenarioId = ref<string | null>(null);
@@ -37,7 +35,8 @@ const followingLatest = ref(true);
 const playbackPlaying = ref(false);
 const loading = ref(false);
 const error = ref<ApiError | null>(null);
-const mobilePanel = ref<MobilePanel>(null);
+const menuDialog = ref<HTMLDialogElement | null>(null);
+const menuOpen = ref(false);
 const selectedFeatureId = ref<string | null>(null);
 const draft = ref<ScenarioDraft | null>(null);
 const generationLoading = ref(false);
@@ -67,15 +66,6 @@ const selectedLocation = computed(() => {
 const selectedConnection = computed<ConnectionConfig | null>(() => {
   if (!selectedFeatureId.value || !selectedBundle.value) return null;
   return selectedBundle.value.config.connections.find((connection) => connection.id === selectedFeatureId.value) ?? null;
-});
-
-const busiestLocation = computed(() => {
-  if (!displayedSnapshot.value || !selectedBundle.value || !flowId.value) return null;
-  return selectedBundle.value.config.locations.reduce((best, location) => {
-    const count = displayedSnapshot.value?.location_counts[location.id]?.[flowId.value!] ?? 0;
-    const bestCount = displayedSnapshot.value?.location_counts[best.id]?.[flowId.value!] ?? 0;
-    return count > bestCount ? location : best;
-  }, selectedBundle.value.config.locations[0]);
 });
 
 const totalPeople = computed(() => displayedSnapshot.value?.totals[flowId.value ?? ""] ?? 0);
@@ -157,6 +147,7 @@ async function selectScenario(scenarioId: string) {
   selectedFeatureId.value = null;
   latestSnapshot.value = null;
   displayedSnapshot.value = null;
+  closeMenu();
 }
 
 async function pollDraft(draftId: string) {
@@ -198,6 +189,7 @@ async function generateTown(payload: { generationSeed?: number; population: numb
       ...(payload.generationSeed === undefined ? {} : { generation_seed: payload.generationSeed }),
     });
     draft.value = created;
+    closeMenu();
     if (created.compile_status === "ready" && created.bundle) {
       selectedBundle.value = created.bundle;
       generationLoading.value = false;
@@ -225,7 +217,7 @@ async function startRun(seed?: number) {
     updateFromDetail(detail);
     await refreshRuns();
     schedulePoll();
-    mobilePanel.value = null;
+    closeMenu();
   } catch (cause) {
     error.value = normalizeError(cause);
   } finally {
@@ -247,7 +239,7 @@ async function selectRun(runId: string) {
     selectedScenarioId.value = detail.run.scenario_id;
     selectedFeatureId.value = null;
     if (detail.run.status === "running" || detail.run.status === "paused") schedulePoll();
-    mobilePanel.value = null;
+    closeMenu();
   } catch (cause) {
     error.value = normalizeError(cause);
   } finally {
@@ -376,8 +368,18 @@ async function playNext() {
   }
 }
 
-function setMobilePanel(panel: Exclude<MobilePanel, null>) {
-  mobilePanel.value = mobilePanel.value === panel ? null : panel;
+function openMenu() {
+  if (!menuDialog.value?.open) menuDialog.value?.showModal();
+  menuOpen.value = true;
+}
+
+function closeMenu() {
+  if (menuDialog.value?.open) menuDialog.value.close();
+  menuOpen.value = false;
+}
+
+function closeMenuFromBackdrop(event: MouseEvent) {
+  if (event.target === menuDialog.value) closeMenu();
 }
 
 function featureName(featureId: string): string {
@@ -397,109 +399,116 @@ function statusLabel(status: RunRecord["status"] | null): string {
 }
 
 onMounted(loadInitial);
-onUnmounted(clearTimers);
+onUnmounted(() => {
+  clearTimers();
+  closeMenu();
+});
 </script>
 
 <template>
   <div class="app-shell">
-    <header class="topbar">
-      <div class="brand-lockup">
-        <div class="brand-mark"><Activity :size="18" stroke-width="2.5" aria-hidden="true" /></div>
-        <div>
-          <p class="brand-eyebrow">WORLD SIMULATION / 01</p>
-          <h1>{{ selectedBundle?.config.name ?? "世界模拟" }} <span>流量制图台</span></h1>
+    <main class="map-workspace">
+      <CityMap
+        :bundle="selectedBundle"
+        :snapshot="displayedSnapshot"
+        :run-rate="runRate"
+        :running="selectedRun?.status === 'running' && followingLatest"
+        :selected-feature-id="selectedFeatureId"
+        @select-feature="selectedFeatureId = $event"
+      />
+
+      <header class="map-header">
+        <div class="map-title" aria-live="polite">
+          <h1>{{ selectedBundle?.config.name ?? "世界模拟" }}</h1>
+          <p>
+            <span class="status-dot" :class="`status-${selectedRun?.status ?? 'idle'}`"></span>
+            {{ statusLabel(selectedRun?.status ?? null) }}
+            <span aria-hidden="true">·</span>
+            {{ formatNumber(totalPeople || selectedBundle?.town_skeleton?.requested_population || 0) }} 居民
+            <span v-if="selectedBundle?.town_skeleton" aria-hidden="true">·</span>
+            <span v-if="selectedBundle?.town_skeleton">SEED {{ selectedBundle.town_skeleton.generation_seed }}</span>
+          </p>
         </div>
-      </div>
+        <button class="menu-button" type="button" aria-label="打开 Menu" title="打开 Menu" @click="openMenu">
+          <Menu :size="15" aria-hidden="true" />
+          <span>Menu</span>
+        </button>
+      </header>
+
       <div class="topbar-readout" aria-live="polite">
-        <span class="readout-label">{{ selectedBundle?.config.name ?? "未选择场景" }}</span>
-        <span class="readout-divider">/</span>
-        <span class="status-dot" :class="`status-${selectedRun?.status ?? 'idle'}`"></span>
-        <span class="status-label">{{ statusLabel(selectedRun?.status ?? null) }}</span>
         <span class="tick-readout">T+{{ displayedTick.toString().padStart(4, "0") }}</span>
       </div>
-      <div class="mobile-tools">
-        <button class="icon-button icon-button--on-dark" type="button" aria-label="打开控制面板" title="控制面板" @click="setMobilePanel('controls')">
-          <Menu v-if="mobilePanel !== 'controls'" :size="18" aria-hidden="true" />
-          <X v-else :size="18" aria-hidden="true" />
-        </button>
-        <button class="icon-button icon-button--on-dark" type="button" aria-label="打开统计面板" title="统计面板" @click="setMobilePanel('stats')">
-          <ChevronDown :size="18" aria-hidden="true" />
-        </button>
-      </div>
-    </header>
+      <div v-if="loading" class="map-loading" role="status"><span class="loading-pip"></span>正在同步</div>
 
-    <main class="workspace">
-      <div class="panel-shell panel-shell--controls" :class="{ 'panel-shell--open': mobilePanel === 'controls' }">
-        <ControlRail
-          :scenarios="scenarios"
-          :selected-scenario-id="selectedScenarioId"
-          :runs="recentRuns"
-          :selected-run="selectedRun"
-          :loading="loading"
-          :error="error"
-          :draft="draft"
-          :generation-loading="generationLoading"
-          @select-scenario="selectScenario"
-          @select-run="selectRun"
-          @start="startRun"
-          @command="command"
-          @set-rate="setRate"
-          @generate-town="generateTown"
-        />
-      </div>
-
-      <section class="map-workspace">
-        <CityMap
-          :bundle="selectedBundle"
-          :snapshot="displayedSnapshot"
-          :run-rate="runRate"
-          :running="selectedRun?.status === 'running' && followingLatest"
-          :selected-feature-id="selectedFeatureId"
-          @select-feature="selectedFeatureId = $event"
-        />
-        <div v-if="loading" class="map-loading" role="status"><span class="loading-pip"></span>正在同步</div>
-      </section>
-
-      <div class="panel-shell panel-shell--stats" :class="{ 'panel-shell--open': mobilePanel === 'stats' }">
-        <aside class="stats-panel" aria-label="流量统计">
-          <section class="stats-heading">
-            <div class="section-kicker">读数 / {{ displayedTick.toString().padStart(4, "0") }}</div>
-            <div class="big-number">{{ formatNumber(totalPeople) }}</div>
-            <div class="big-number-label">场景内聚合居民</div>
-          </section>
-          <section class="stats-section">
+      <aside v-if="selectedFeatureId && !menuOpen" class="map-inspector" aria-label="当前选中对象">
+        <div class="inspector-heading">
+          <div>
             <div class="section-kicker">当前焦点</div>
-            <div v-if="selectedFeatureId" class="focus-line">
-              <span class="focus-marker"></span>
-              <strong>{{ featureName(selectedFeatureId) }}</strong>
-            </div>
-            <div v-else class="empty-line">暂无选择</div>
-            <dl v-if="selectedLocation && displayedSnapshot && flowId" class="metric-list">
-              <div><dt>地点存量</dt><dd>{{ formatNumber(displayedSnapshot.location_counts[selectedLocation.id]?.[flowId] ?? 0) }}</dd></div>
-              <div><dt>坐标</dt><dd>{{ selectedLocation.position[0] }}, {{ selectedLocation.position[1] }}</dd></div>
-            </dl>
-            <dl v-else-if="selectedConnection && displayedSnapshot && flowId" class="metric-list">
-              <div><dt>刚刚出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, flowId)) }}</dd></div>
-              <div><dt>道路容量</dt><dd>{{ formatNumber(selectedConnection.capacity_per_tick[flowId] ?? 0) }} / 秒</dd></div>
-              <div><dt>旅行时间</dt><dd>{{ selectedConnection.travel_time_ticks }} 秒</dd></div>
-            </dl>
-          </section>
-          <section class="stats-section">
-            <div class="section-kicker">场景摘要</div>
-            <dl class="metric-list">
-              <div><dt>地点</dt><dd>{{ selectedBundle?.config.locations.length ?? 0 }}</dd></div>
-              <div><dt>有向街道</dt><dd>{{ selectedBundle?.config.connections.length ?? 0 }}</dd></div>
-              <div><dt>最高存量</dt><dd>{{ busiestLocation?.name ?? "—" }}</dd></div>
-              <div><dt>Seed</dt><dd>{{ selectedRun?.seed ?? "—" }}</dd></div>
-            </dl>
-          </section>
-          <div v-if="selectedRun?.error_message" class="stats-alert" role="alert">
-            <AlertTriangle :size="16" aria-hidden="true" />
-            <span>{{ selectedRun.error_message }}</span>
+            <strong>{{ featureName(selectedFeatureId) }}</strong>
           </div>
-        </aside>
-      </div>
-      <button v-if="mobilePanel" class="mobile-backdrop" type="button" aria-label="关闭面板" @click="mobilePanel = null"></button>
+          <button class="icon-button icon-button--small" type="button" aria-label="关闭对象信息" title="关闭" @click="selectedFeatureId = null">
+            <X :size="15" aria-hidden="true" />
+          </button>
+        </div>
+        <dl v-if="selectedLocation && displayedSnapshot && flowId" class="metric-list">
+          <div><dt>地点存量</dt><dd>{{ formatNumber(displayedSnapshot.location_counts[selectedLocation.id]?.[flowId] ?? 0) }}</dd></div>
+          <div><dt>坐标</dt><dd>{{ selectedLocation.position[0] }}, {{ selectedLocation.position[1] }}</dd></div>
+        </dl>
+        <dl v-else-if="selectedConnection && displayedSnapshot && flowId" class="metric-list">
+          <div><dt>刚刚出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, flowId)) }}</dd></div>
+          <div><dt>道路容量</dt><dd>{{ formatNumber(selectedConnection.capacity_per_tick[flowId] ?? 0) }} / 秒</dd></div>
+          <div><dt>旅行时间</dt><dd>{{ selectedConnection.travel_time_ticks }} 秒</dd></div>
+        </dl>
+      </aside>
+
+      <dialog ref="menuDialog" class="menu-dialog" aria-labelledby="menu-title" @close="menuOpen = false" @click="closeMenuFromBackdrop">
+        <div class="menu-drawer">
+          <header class="drawer-header">
+            <div>
+              <p>WORLD SIMULATION / 01</p>
+              <h2 id="menu-title">Menu</h2>
+            </div>
+            <button class="icon-button" type="button" aria-label="关闭 Menu" title="关闭 Menu" @click="closeMenu">
+              <X :size="18" aria-hidden="true" />
+            </button>
+          </header>
+          <div class="drawer-scroll">
+            <ControlRail
+              :scenarios="scenarios"
+              :selected-scenario-id="selectedScenarioId"
+              :runs="recentRuns"
+              :selected-run="selectedRun"
+              :loading="loading"
+              :error="error"
+              :draft="draft"
+              :generation-loading="generationLoading"
+              @select-scenario="selectScenario"
+              @select-run="selectRun"
+              @start="startRun"
+              @command="command"
+              @set-rate="setRate"
+              @generate-town="generateTown"
+            />
+            <section v-if="selectedFeatureId" class="drawer-selection">
+              <div class="section-kicker">当前焦点</div>
+              <div class="focus-line"><span class="focus-marker"></span><strong>{{ featureName(selectedFeatureId) }}</strong></div>
+              <dl v-if="selectedLocation && displayedSnapshot && flowId" class="metric-list">
+                <div><dt>地点存量</dt><dd>{{ formatNumber(displayedSnapshot.location_counts[selectedLocation.id]?.[flowId] ?? 0) }}</dd></div>
+                <div><dt>坐标</dt><dd>{{ selectedLocation.position[0] }}, {{ selectedLocation.position[1] }}</dd></div>
+              </dl>
+              <dl v-else-if="selectedConnection && displayedSnapshot && flowId" class="metric-list">
+                <div><dt>刚刚出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, flowId)) }}</dd></div>
+                <div><dt>道路容量</dt><dd>{{ formatNumber(selectedConnection.capacity_per_tick[flowId] ?? 0) }} / 秒</dd></div>
+                <div><dt>旅行时间</dt><dd>{{ selectedConnection.travel_time_ticks }} 秒</dd></div>
+              </dl>
+            </section>
+            <div v-if="selectedRun?.error_message" class="stats-alert" role="alert">
+              <AlertTriangle :size="16" aria-hidden="true" />
+              <span>{{ selectedRun.error_message }}</span>
+            </div>
+          </div>
+        </div>
+      </dialog>
     </main>
 
     <PlaybackTimeline
