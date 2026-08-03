@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { Deck, OrthographicView, type Layer, type PickingInfo } from "@deck.gl/core";
 import type { RunRate, ScenarioBundle, SnapshotState } from "./api";
 import {
@@ -28,6 +28,18 @@ let deck: Deck<OrthographicView> | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let renderData: TownRenderData | null = null;
 let staticLayers: Layer[] = [];
+const viewZoom = ref(0);
+
+function niceScale(rawDistance: number): number {
+  const exponent = Math.floor(Math.log10(Math.max(rawDistance, 0.001)));
+  const base = rawDistance / 10 ** exponent;
+  const niceBase = base <= 1 ? 1 : base <= 2 ? 2 : base <= 5 ? 5 : 10;
+  return niceBase * 10 ** exponent;
+}
+
+const scaleDistance = computed(() => niceScale(110 * 2 ** -viewZoom.value));
+const scaleLabel = computed(() => scaleDistance.value >= 1000 ? `${(scaleDistance.value / 1000).toFixed(scaleDistance.value >= 10_000 ? 0 : 1)} km` : `${Math.round(scaleDistance.value)} m`);
+const scaleWidth = computed(() => Math.max(48, Math.min(140, 110 * scaleDistance.value / (110 * 2 ** -viewZoom.value))));
 
 function fittedViewState(data: TownRenderData) {
   const host = mapHost.value?.getBoundingClientRect();
@@ -50,9 +62,11 @@ function updateLayers(refit = false, rebuildStatic = false) {
     renderData = props.bundle ? assembleTownRenderData(props.bundle) : null;
     staticLayers = renderData ? createStaticTownLayers(renderData, props.selectedFeatureId) : [];
   }
+  const viewState = refit && renderData ? fittedViewState(renderData) : null;
+  if (viewState) viewZoom.value = viewState.zoom;
   deck.setProps({
     layers: props.bundle ? [...staticLayers, ...createDynamicTownLayers(props.bundle, props.snapshot, props.selectedFeatureId)] : [],
-    ...(refit && renderData ? { initialViewState: fittedViewState(renderData) } : {}),
+    ...(viewState ? { initialViewState: viewState } : {}),
   });
 }
 
@@ -69,12 +83,15 @@ onMounted(async () => {
     useDevicePixels: true,
     pickingRadius: 4,
     getCursor: ({ isDragging, isHovering }) => isDragging ? "grabbing" : isHovering ? "pointer" : "grab",
+    onViewStateChange: ({ viewState }) => {
+      if (typeof viewState.zoom === "number") viewZoom.value = viewState.zoom;
+    },
     getTooltip: ({ object }: PickingInfo<TownFeature>) => object ? {
       text: object.name,
       style: {
-        color: "#d9f2f3",
-        backgroundColor: "rgba(4, 19, 27, 0.94)",
-        border: "1px solid rgba(89, 211, 224, 0.55)",
+        color: "#3f3b38",
+        backgroundColor: "rgba(237, 233, 222, 0.96)",
+        border: "1px solid rgba(63, 61, 56, 0.35)",
         borderRadius: "2px",
         fontSize: "11px",
       },
@@ -116,6 +133,15 @@ watch(() => props.snapshot?.tick, () => updateLayers(false));
       <span><i class="legend-dot legend-dot--people"></i>人流</span>
       <span><i class="legend-diamond legend-diamond--vehicle"></i>车流</span>
       <span><i class="legend-heat"></i>热力</span>
+    </div>
+    <div class="map-scale" aria-label="地图比例尺">
+      <span class="map-scale__line" :style="{ width: `${scaleWidth}px` }"></span>
+      <strong>{{ scaleLabel }}</strong>
+    </div>
+    <div class="map-compass" aria-label="指北针">
+      <span>N</span>
+      <i class="map-compass__vertical"></i>
+      <i class="map-compass__horizontal"></i>
     </div>
     <div v-if="bundle" class="map-source">{{ bundle.town_skeleton ? "RADIAL-V1" : "LEGACY" }}</div>
     <div v-if="snapshot" class="map-stamp">T+{{ snapshot.tick.toString().padStart(4, "0") }}</div>
