@@ -552,7 +552,7 @@ coordinateSystem = CARTESIAN
 11 selection           PolygonLayer / PathLayer
 ```
 
-道路热度不是普通 KDE 热斑。它通过 `connection_street_ids` 将共享街段的连接统计聚合到物理 TownStreet，再以 `in_transit` 存量占容量和当前 tick 的 `departed`/`arrived` 吞吐占容量中的较大值映射透明度、颜色和宽度，使高流量仍被约束在街道上。地点人流热力使用 `HeatmapLayer`，必须设置固定 `colorDomain`，避免缩放改变图例语义。
+道路热度不是普通 KDE 热斑。它通过 `connection_street_ids` 将共享街段的连接统计聚合到物理 TownStreet，再以 `in_transit` 存量占容量和当前 tick 的 `departed`/`arrived` 吞吐占容量中的较大值映射透明度、颜色和宽度，使高流量仍被约束在街道上。该版本展示的是关联线路负载；若要得到精确街段驻留，需要在快照中保存街段级队列。地点人流热力使用 `HeatmapLayer`，必须设置固定 `colorDomain`，避免缩放改变图例语义。
 
 ### 10.3 更新频率
 

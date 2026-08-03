@@ -190,7 +190,7 @@ SimulationState
 
 新快照不保存 `transit_buckets`。历史 v1 JSON 由后端读取适配器求和为 `in_transit`，API 始终向 Vue 返回 v2。旧场景的地点和连接由 `LegacyRenderAdapter` 转成最小 deck.gl 地标与道路，因此旧回放仍可读，但不会伪造原数据中不存在的建筑。
 
-道路统计同时读取连接快照的 `in_transit`、`departed` 和 `arrived`：前者是当前道路存量，后两者是当前 tick 的出发/到达事件，不是累计值。生成场景必须通过 `street_segment_ids` 将共享同一物理街段的 FlowConnection 聚合到 TownStreet，不能直接拾取互相重叠的连接路径。道路视觉强度取存量占容量和当前 tick 吞吐占容量中的较大值，悬停提示分别展示三种口径。
+道路统计同时读取连接快照的 `in_transit`、`departed` 和 `arrived`：前者是当前道路存量，后两者是当前 tick 的出发/到达事件，不是累计值。生成场景必须通过 `street_segment_ids` 将共享同一物理街段的 FlowConnection 聚合到 TownStreet，不能直接拾取互相重叠的连接路径。道路视觉强度取存量占容量和当前 tick 吞吐占容量中的较大值，悬停提示分别展示三种口径。由于 v2 快照仍是连接级队列，街段值表示关联线路负载；精确街段驻留需要新增街段级快照。
 
 每个 flow type 都检查：
 
