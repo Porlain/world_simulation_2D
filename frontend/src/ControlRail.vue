@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Check, CircleAlert, Gauge, History, MapPinned, Pause, Play, RotateCcw, Square } from "lucide-vue-next";
+import { Check, CircleAlert, Gauge, History, Layers3, MapPinned, Pause, Play, RotateCcw, Square } from "lucide-vue-next";
 import type { ApiError, RunRate, RunRecord, ScenarioBundle, ScenarioDraft } from "./api";
+import type { TownLayerVisibility } from "./townLayers";
 
 const props = defineProps<{
   scenarios: ScenarioBundle[];
@@ -12,6 +13,7 @@ const props = defineProps<{
   error: ApiError | null;
   draft: ScenarioDraft | null;
   generationLoading: boolean;
+  layerVisibility: TownLayerVisibility;
 }>();
 
 const emit = defineEmits<{
@@ -21,12 +23,22 @@ const emit = defineEmits<{
   (event: "command", action: "pause" | "resume" | "end"): void;
   (event: "set-rate", rate: RunRate): void;
   (event: "generate-town", payload: { generationSeed?: number; population: number }): void;
+  (event: "toggle-layer", layer: keyof TownLayerVisibility): void;
 }>();
 
 const seedInput = ref("");
 const generationSeedInput = ref("");
 const populationInput = ref("11499");
 const rateOptions: RunRate[] = [0.5, 1, 2, 4];
+const layerOptions: Array<{ key: keyof TownLayerVisibility; label: string }> = [
+  { key: "walls", label: "城墙" },
+  { key: "roads", label: "道路" },
+  { key: "buildings", label: "建筑" },
+  { key: "landmarks", label: "功能建筑" },
+  { key: "people", label: "人流" },
+  { key: "vehicles", label: "车流" },
+  { key: "heat", label: "热力" },
+];
 
 const selectedScenario = computed(() =>
   props.scenarios.find((scenario) => scenario.config.scenario_id === props.selectedScenarioId),
@@ -81,6 +93,19 @@ function timeLabel(value: string): string {
         <span>{{ draft.town_skeleton.buildings.length }} 座建筑</span>
         <span>{{ draft.town_skeleton.streets.length }} 条街道</span>
         <span>{{ draft.compile_status === "ready" ? "已就绪" : draft.compile_status === "failed" ? "失败" : "编译中" }}</span>
+      </div>
+    </section>
+    <section class="rail-section rail-section--layers">
+      <div class="section-kicker"><Layers3 :size="14" aria-hidden="true" /> 地图图层</div>
+      <div class="layer-grid">
+        <label v-for="option in layerOptions" :key="option.key" class="layer-toggle">
+          <input
+            type="checkbox"
+            :checked="layerVisibility[option.key]"
+            @change="emit('toggle-layer', option.key)"
+          />
+          <span>{{ option.label }}</span>
+        </label>
       </div>
     </section>
     <section class="rail-section rail-section--scenario">

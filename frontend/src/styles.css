@@ -60,7 +60,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, dialog:focus-vi
   margin: 0;
   color: var(--ink);
   font-family: Georgia, "Songti SC", "STSong", serif;
-  font-size: clamp(25px, 3.3vw, 46px);
+  font-size: clamp(24px, 2.7vw, 38px);
   font-weight: 500;
   line-height: 1.05;
   text-shadow: 0 1px 0 rgb(255 255 255 / 24%);
@@ -264,6 +264,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, dialog:focus-vi
 .command-grid .action-button { padding: 0 3px; font-size: 10px; }
 .scenario-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 10px; color: var(--muted); font-size: 10px; }
 .scenario-meta span::before { margin-right: 4px; color: var(--label-accent); content: "·"; }
+.layer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; }
+.layer-toggle { display: flex; align-items: center; gap: 7px; min-height: 28px; color: var(--ink); font-size: 11px; cursor: pointer; }
+.layer-toggle input { width: 15px; height: 15px; margin: 0; accent-color: var(--label-accent); }
 .run-list { display: grid; gap: 4px; }
 .run-row { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; width: 100%; padding: 9px 8px; color: var(--ink); text-align: left; background: transparent; border: 1px solid transparent; border-radius: 2px; }
 .run-row:hover { background: rgb(63 61 56 / 9%); }

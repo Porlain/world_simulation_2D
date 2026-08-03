@@ -7,6 +7,7 @@ import {
   createDynamicTownLayers,
   createStaticTownLayers,
   type TownFeature,
+  type TownLayerVisibility,
   type TownRenderData,
 } from "./townLayers";
 
@@ -16,6 +17,7 @@ const props = defineProps<{
   runRate: RunRate;
   running: boolean;
   selectedFeatureId: string | null;
+  visibility: TownLayerVisibility;
 }>();
 
 const emit = defineEmits<{
@@ -47,7 +49,7 @@ function fittedViewState(data: TownRenderData) {
   const height = Math.max(240, host?.height ?? 600);
   const sceneWidth = Math.max(1, data.bounds[2] - data.bounds[0]);
   const sceneHeight = Math.max(1, data.bounds[3] - data.bounds[1]);
-  const zoom = Math.log2(Math.max(0.01, Math.min((width - 80) / sceneWidth, (height - 80) / sceneHeight)));
+  const zoom = Math.log2(Math.max(0.01, Math.min((width - 110) / sceneWidth, (height - 190) / sceneHeight)));
   return {
     target: [(data.bounds[0] + data.bounds[2]) / 2, (data.bounds[1] + data.bounds[3]) / 2, 0] as [number, number, number],
     zoom,
@@ -60,12 +62,12 @@ function updateLayers(refit = false, rebuildStatic = false) {
   if (!deck) return;
   if (rebuildStatic || (props.bundle && !renderData)) {
     renderData = props.bundle ? assembleTownRenderData(props.bundle) : null;
-    staticLayers = renderData ? createStaticTownLayers(renderData, props.selectedFeatureId) : [];
+    staticLayers = renderData ? createStaticTownLayers(renderData, props.selectedFeatureId, props.visibility) : [];
   }
   const viewState = refit && renderData ? fittedViewState(renderData) : null;
   if (viewState) viewZoom.value = viewState.zoom;
   deck.setProps({
-    layers: props.bundle ? [...staticLayers, ...createDynamicTownLayers(props.bundle, props.snapshot, props.selectedFeatureId)] : [],
+    layers: props.bundle ? [...staticLayers, ...createDynamicTownLayers(props.bundle, props.snapshot, props.selectedFeatureId, undefined, props.visibility)] : [],
     ...(viewState ? { initialViewState: viewState } : {}),
   });
 }
@@ -119,6 +121,7 @@ onUnmounted(() => {
 watch(() => props.bundle, () => updateLayers(true, true));
 watch(() => props.selectedFeatureId, () => updateLayers(false, true));
 watch(() => props.snapshot?.tick, () => updateLayers(false));
+watch(() => props.visibility, () => updateLayers(false, true), { deep: true });
 </script>
 
 <template>
@@ -126,13 +129,13 @@ watch(() => props.snapshot?.tick, () => updateLayers(false));
     <div v-if="!bundle" class="map-empty">暂无场景</div>
     <div v-if="renderError" class="map-render-error" role="alert">{{ renderError }}</div>
     <div class="map-legend map-legend--static" aria-label="地图图例">
-      <span><i class="legend-line legend-line--wall"></i>城墙</span>
-      <span><i class="legend-line legend-line--road"></i>街道</span>
-      <span><i class="legend-building"></i>建筑</span>
-      <span><i class="legend-landmark"></i>地标</span>
-      <span><i class="legend-dot legend-dot--people"></i>人流</span>
-      <span><i class="legend-diamond legend-diamond--vehicle"></i>车流</span>
-      <span><i class="legend-heat"></i>热力</span>
+      <span v-if="visibility.walls"><i class="legend-line legend-line--wall"></i>城墙</span>
+      <span v-if="visibility.roads"><i class="legend-line legend-line--road"></i>街道</span>
+      <span v-if="visibility.buildings"><i class="legend-building"></i>建筑</span>
+      <span v-if="visibility.landmarks"><i class="legend-landmark"></i>地标</span>
+      <span v-if="visibility.people"><i class="legend-dot legend-dot--people"></i>人流</span>
+      <span v-if="visibility.vehicles"><i class="legend-diamond legend-diamond--vehicle"></i>车流</span>
+      <span v-if="visibility.heat"><i class="legend-heat"></i>热力</span>
     </div>
     <div class="map-scale" aria-label="地图比例尺">
       <span class="map-scale__line" :style="{ width: `${scaleWidth}px` }"></span>

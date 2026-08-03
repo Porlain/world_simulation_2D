@@ -14,6 +14,7 @@ import type {
 
 export interface TownFeature {
   id: string;
+  sourceId?: string;
   name: string;
   kind: string;
   polygon?: Coordinate[];
@@ -30,6 +31,26 @@ export interface TownRenderData {
   walls: TownFeature[];
   landmarks: TownFeature[];
 }
+
+export interface TownLayerVisibility {
+  walls: boolean;
+  roads: boolean;
+  buildings: boolean;
+  landmarks: boolean;
+  people: boolean;
+  vehicles: boolean;
+  heat: boolean;
+}
+
+const allLayersVisible: TownLayerVisibility = {
+  walls: true,
+  roads: true,
+  buildings: true,
+  landmarks: true,
+  people: true,
+  vehicles: true,
+  heat: true,
+};
 
 interface FlowRoad extends TownFeature {
   path: Coordinate[];
@@ -141,15 +162,94 @@ function wallSegments(boundary: Coordinate[], landmarks: TownLandmark[]): TownFe
   return result;
 }
 
-function landmarkPolygon(feature: TownFeature, size: number): Coordinate[] {
-  const position = feature.position ?? [0, 0];
-  const sides = feature.kind === "military" ? 3 : feature.kind === "market" || feature.kind === "stable" ? 6 : feature.kind === "administrative" ? 8 : 4;
-  const rotation = feature.kind === "plaza" || feature.kind === "religious" ? Math.PI / 4 : -Math.PI / 2;
+function rectangle(position: Coordinate, width: number, height: number, rotation = 0): Coordinate[] {
+  return [
+    [-width / 2, -height / 2],
+    [width / 2, -height / 2],
+    [width / 2, height / 2],
+    [-width / 2, height / 2],
+  ].map(([x, y]) => [
+    position[0] + x * Math.cos(rotation) - y * Math.sin(rotation),
+    position[1] + x * Math.sin(rotation) + y * Math.cos(rotation),
+  ]);
+}
+
+function circle(position: Coordinate, radius: number, sides = 10): Coordinate[] {
   return Array.from({ length: sides }, (_, index) => {
-    const angle = rotation + (index * Math.PI * 2) / sides;
-    const radius = feature.kind === "gate" ? size * 0.72 : size;
+    const angle = index * Math.PI * 2 / sides;
     return [position[0] + Math.cos(angle) * radius, position[1] + Math.sin(angle) * radius];
   });
+}
+
+function offset(position: Coordinate, x: number, y: number): Coordinate {
+  return [position[0] + x, position[1] + y];
+}
+
+function landmarkMotif(feature: TownFeature, size: number): TownFeature[] {
+  const position = feature.position ?? [0, 0];
+  const part = (id: string, polygon: Coordinate[]): TownFeature => ({
+    ...feature,
+    id: `${feature.id}-${id}`,
+    sourceId: feature.id,
+    polygon,
+  });
+
+  switch (feature.kind) {
+    case "administrative":
+      return [
+        part("hall", rectangle(position, size * 1.45, size * 0.9)),
+        part("tower", rectangle(offset(position, 0, size * 0.58), size * 0.42, size * 0.58)),
+      ];
+    case "market":
+      return [
+        part("court", rectangle(position, size * 0.72, size * 0.72, Math.PI / 4)),
+        ...([[0, 0.58], [0.58, 0], [0, -0.58], [-0.58, 0]] as const).map(([x, y], index) =>
+          part(`stall-${index}`, rectangle(offset(position, x * size, y * size), size * 0.46, size * 0.3, x === 0 ? 0 : Math.PI / 2)),
+        ),
+      ];
+    case "religious":
+      return [
+        part("nave", rectangle(position, size * 0.5, size * 1.5)),
+        part("crossing", rectangle(position, size * 1.15, size * 0.42)),
+        part("dome", circle(offset(position, 0, size * 0.64), size * 0.28)),
+      ];
+    case "military":
+      return [
+        part("keep", rectangle(position, size * 1.18, size * 0.94)),
+        ...([-1, 1] as const).flatMap((x) => ([-1, 1] as const).map((y) =>
+          part(`tower-${x}-${y}`, circle(offset(position, x * size * 0.56, y * size * 0.44), size * 0.25, 8)),
+        )),
+      ];
+    case "storage":
+      return [-0.48, 0, 0.48].map((x, index) =>
+        part(`granary-${index}`, circle(offset(position, x * size, 0), size * 0.32, 12)),
+      );
+    case "workshop":
+      return [
+        part("anvil", rectangle(offset(position, 0, -size * 0.28), size * 1.2, size * 0.38)),
+        part("stem", rectangle(position, size * 0.28, size * 0.9, -0.55)),
+        part("hammer", rectangle(offset(position, -size * 0.25, size * 0.32), size * 0.82, size * 0.28, -0.55)),
+      ];
+    case "stable":
+      return [
+        part("range-a", rectangle(offset(position, -size * 0.34, 0), size * 0.42, size * 1.35)),
+        part("range-b", rectangle(offset(position, size * 0.34, 0), size * 0.42, size * 1.35)),
+        part("crossing", rectangle(position, size * 0.68, size * 0.24)),
+      ];
+    case "plaza":
+      return [
+        part("square", rectangle(position, size * 1.35, size * 1.35)),
+        part("fountain", circle(position, size * 0.27, 12)),
+      ];
+    case "gate":
+      return [
+        part("tower-a", rectangle(offset(position, -size * 0.42, 0), size * 0.42, size * 0.86)),
+        part("tower-b", rectangle(offset(position, size * 0.42, 0), size * 0.42, size * 0.86)),
+        part("lintel", rectangle(offset(position, 0, size * 0.35), size * 0.7, size * 0.22)),
+      ];
+    default:
+      return [part("mark", rectangle(position, size, size, Math.PI / 4))];
+  }
 }
 
 export function assembleTownRenderData(bundle: ScenarioBundle): TownRenderData {
@@ -206,14 +306,19 @@ export function assembleTownRenderData(bundle: ScenarioBundle): TownRenderData {
   };
 }
 
-export function createStaticTownLayers(data: TownRenderData, selectedFeatureId: string | null): Layer[] {
+export function createStaticTownLayers(
+  data: TownRenderData,
+  selectedFeatureId: string | null,
+  visibility: TownLayerVisibility = allLayersVisible,
+): Layer[] {
   const width = Math.max(1, data.bounds[2] - data.bounds[0]);
   const height = Math.max(1, data.bounds[3] - data.bounds[1]);
-  const landmarkSize = Math.max(5, Math.min(14, Math.hypot(width, height) * 0.012));
-  const landmarkPolygons = data.landmarks.map((feature) => ({
-    ...feature,
-    polygon: landmarkPolygon(feature, landmarkSize),
-  }));
+  const landmarkSize = Math.max(7, Math.min(18, Math.hypot(width, height) * 0.014));
+  const landmarkPolygons = data.landmarks.flatMap((feature) => landmarkMotif(feature, landmarkSize));
+  const wallTowers = Array.from(new Map(data.walls.flatMap((wall) => wall.path ?? []).map((position, index) => [
+    `${position[0]}:${position[1]}`,
+    { id: `wall-tower-${index}`, name: "Wall Tower", kind: "wall", position },
+  ])).values());
   const common = { coordinateSystem: COORDINATE_SYSTEM.CARTESIAN } as const;
   return [
     new PolygonLayer<TownFeature>({
@@ -229,7 +334,7 @@ export function createStaticTownLayers(data: TownRenderData, selectedFeatureId: 
       getLineColor: (feature) => feature.id === selectedFeatureId ? [181, 106, 63, 220] : [111, 105, 96, 35],
       getLineWidth: (feature) => feature.id === selectedFeatureId ? 2 : 0.5,
     }),
-    new PolygonLayer<TownFeature>({
+    ...(visibility.buildings ? [new PolygonLayer<TownFeature>({
       id: "building-fill",
       data: data.buildings,
       ...common,
@@ -241,8 +346,8 @@ export function createStaticTownLayers(data: TownRenderData, selectedFeatureId: 
       getFillColor: (feature) => buildingColors[feature.kind as BuildingKind] ?? buildingColors.residential,
       getLineColor: (feature) => feature.id === selectedFeatureId ? [181, 106, 63, 255] : [77, 83, 92, 230],
       getLineWidth: (feature) => feature.id === selectedFeatureId ? 2 : 0.65,
-    }),
-    new PathLayer<TownFeature>({
+    })] : []),
+    ...(visibility.roads ? [new PathLayer<TownFeature>({
       id: "road-edge",
       data: data.streets,
       ...common,
@@ -265,8 +370,8 @@ export function createStaticTownLayers(data: TownRenderData, selectedFeatureId: 
       getPath: (feature) => feature.path!,
       getColor: (feature) => feature.id === selectedFeatureId ? [181, 106, 63, 255] : [237, 233, 222, 245],
       getWidth: (feature) => feature.kind === "primary" ? 6 : feature.kind === "ring" ? 3.5 : 2,
-    }),
-    new PathLayer<TownFeature>({
+    })] : []),
+    ...(visibility.walls ? [new PathLayer<TownFeature>({
       id: "boundary-wall",
       data: data.walls,
       ...common,
@@ -276,9 +381,19 @@ export function createStaticTownLayers(data: TownRenderData, selectedFeatureId: 
       jointRounded: false,
       getPath: (feature) => feature.path!,
       getColor: (feature) => feature.id === selectedFeatureId ? [181, 106, 63, 255] : [61, 61, 59, 245],
-      getWidth: (feature) => feature.id === selectedFeatureId ? 4.5 : 3,
+      getWidth: (feature) => feature.id === selectedFeatureId ? 5.5 : 4,
     }),
-    new PolygonLayer<TownFeature>({
+    new ScatterplotLayer<TownFeature>({
+      id: "wall-towers",
+      data: wallTowers,
+      ...common,
+      pickable: false,
+      radiusUnits: "pixels",
+      getPosition: (feature) => feature.position!,
+      getRadius: 3,
+      getFillColor: [61, 61, 59, 245],
+    })] : []),
+    ...(visibility.landmarks ? [new PolygonLayer<TownFeature>({
       id: "landmark-symbols",
       data: landmarkPolygons,
       ...common,
@@ -288,8 +403,8 @@ export function createStaticTownLayers(data: TownRenderData, selectedFeatureId: 
       lineWidthUnits: "pixels",
       getPolygon: (feature) => feature.polygon!,
       getFillColor: (feature) => landmarkColors[feature.kind] ?? landmarkColors.residential,
-      getLineColor: (feature) => feature.id === selectedFeatureId ? [181, 106, 63, 255] : [63, 61, 56, 225],
-      getLineWidth: (feature) => feature.id === selectedFeatureId ? 2.5 : 1,
+      getLineColor: (feature) => feature.sourceId === selectedFeatureId ? [181, 106, 63, 255] : [63, 61, 56, 225],
+      getLineWidth: (feature) => feature.sourceId === selectedFeatureId ? 2.5 : 1,
     }),
     new TextLayer<TownFeature>({
       id: "landmark-labels",
@@ -308,7 +423,7 @@ export function createStaticTownLayers(data: TownRenderData, selectedFeatureId: 
       getTextAnchor: "middle",
       getAlignmentBaseline: "bottom",
       background: false,
-    }),
+    })] : []),
   ];
 }
 
@@ -483,24 +598,25 @@ export function createDynamicTownLayers(
   snapshot: SnapshotState | null,
   selectedFeatureId: string | null,
   tickProgress?: number,
+  visibility: TownLayerVisibility = allLayersVisible,
 ): Layer[] {
   if (!snapshot) return [];
   const data = assembleTownFlowData(bundle, snapshot, tickProgress ?? snapshot.tick);
   const common = { coordinateSystem: COORDINATE_SYSTEM.CARTESIAN } as const;
   return [
-    heatLayer("people-heat", data.peopleHeat, [
+    ...(visibility.heat && data.peopleHeat.length ? [heatLayer("people-heat", data.peopleHeat, [
       [33, 132, 153, 0],
       [36, 196, 187, 72],
       [247, 192, 70, 170],
       [225, 75, 65, 220],
-    ]),
-    heatLayer("vehicle-heat", data.vehicleHeat, [
+    ])] : []),
+    ...(visibility.heat && data.vehicleHeat.length ? [heatLayer("vehicle-heat", data.vehicleHeat, [
       [31, 99, 173, 0],
       [42, 165, 221, 78],
       [126, 111, 224, 168],
       [231, 72, 113, 220],
-    ]),
-    new PathLayer<FlowRoad>({
+    ])] : []),
+    ...(visibility.people ? [new PathLayer<FlowRoad>({
       id: "people-flow-roads",
       data: data.roads.filter((road) => road.peopleRatio > 0),
       ...common,
@@ -509,10 +625,10 @@ export function createDynamicTownLayers(
       capRounded: true,
       jointRounded: true,
       getPath: (road) => road.path!,
-      getColor: (road) => [76 + Math.round(170 * road.peopleRatio), 220 - Math.round(130 * road.peopleRatio), 214 - Math.round(110 * road.peopleRatio), 150 + Math.round(90 * road.peopleRatio)],
+      getColor: (road) => [47 + Math.round(145 * road.peopleRatio), 117 - Math.round(48 * road.peopleRatio), 111 - Math.round(42 * road.peopleRatio), 105 + Math.round(110 * road.peopleRatio)],
       getWidth: (road) => 2 + road.peopleRatio * 5,
-    }),
-    new PathLayer<FlowRoad>({
+    })] : []),
+    ...(visibility.vehicles ? [new PathLayer<FlowRoad>({
       id: "vehicle-flow-roads",
       data: data.roads.filter((road) => road.vehicleRatio > 0),
       ...common,
@@ -521,10 +637,10 @@ export function createDynamicTownLayers(
       capRounded: true,
       jointRounded: true,
       getPath: (road) => road.path!,
-      getColor: (road) => [75 + Math.round(160 * road.vehicleRatio), 139 - Math.round(65 * road.vehicleRatio), 236 - Math.round(80 * road.vehicleRatio), 120 + Math.round(100 * road.vehicleRatio)],
+      getColor: (road) => [73 + Math.round(155 * road.vehicleRatio), 124 - Math.round(65 * road.vehicleRatio), 166 - Math.round(72 * road.vehicleRatio), 100 + Math.round(120 * road.vehicleRatio)],
       getWidth: (road) => 1.5 + road.vehicleRatio * 4,
-    }),
-    new ScatterplotLayer<FlowMarker>({
+    })] : []),
+    ...(visibility.people ? [new ScatterplotLayer<FlowMarker>({
       id: "people-flow-markers",
       data: data.peopleMarkers,
       ...common,
@@ -533,11 +649,11 @@ export function createDynamicTownLayers(
       stroked: true,
       getPosition: (marker) => marker.position,
       getRadius: () => 3.2,
-      getFillColor: (marker) => marker.id.startsWith(`${selectedFeatureId ?? "!"}-`) ? [255, 231, 135, 255] : [151, 245, 224, 235],
-      getLineColor: [10, 54, 62, 230],
+      getFillColor: (marker) => marker.id.startsWith(`${selectedFeatureId ?? "!"}-`) ? [181, 106, 63, 255] : [47, 117, 111, 235],
+      getLineColor: [237, 233, 222, 240],
       getLineWidth: 1,
-    }),
-    new PolygonLayer<FlowMarker>({
+    })] : []),
+    ...(visibility.vehicles ? [new PolygonLayer<FlowMarker>({
       id: "vehicle-flow-markers",
       data: data.vehicleMarkers,
       ...common,
@@ -545,9 +661,9 @@ export function createDynamicTownLayers(
       stroked: true,
       filled: true,
       getPolygon: (marker) => marker.polygon!,
-      getFillColor: (marker) => marker.id.startsWith(`${selectedFeatureId ?? "!"}-`) ? [255, 231, 135, 255] : [115, 178, 247, 245],
-      getLineColor: [13, 39, 79, 245],
+      getFillColor: (marker) => marker.id.startsWith(`${selectedFeatureId ?? "!"}-`) ? [181, 106, 63, 255] : [73, 124, 166, 245],
+      getLineColor: [237, 233, 222, 240],
       getLineWidth: 1,
-    }),
+    })] : []),
   ];
 }

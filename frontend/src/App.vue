@@ -4,6 +4,7 @@ import { AlertTriangle, Menu, X } from "lucide-vue-next";
 import ControlRail from "./ControlRail.vue";
 import CityMap from "./CityMap.vue";
 import PlaybackTimeline from "./PlaybackTimeline.vue";
+import type { TownLayerVisibility } from "./townLayers";
 import {
   ApiError,
   createDraftRun,
@@ -40,6 +41,15 @@ const menuOpen = ref(false);
 const selectedFeatureId = ref<string | null>(null);
 const draft = ref<ScenarioDraft | null>(null);
 const generationLoading = ref(false);
+const layerVisibility = ref<TownLayerVisibility>({
+  walls: true,
+  roads: true,
+  buildings: true,
+  landmarks: true,
+  people: true,
+  vehicles: true,
+  heat: true,
+});
 
 let pollTimer: number | null = null;
 let seekTimer: number | null = null;
@@ -382,6 +392,10 @@ function closeMenuFromBackdrop(event: MouseEvent) {
   if (event.target === menuDialog.value) closeMenu();
 }
 
+function toggleLayer(layer: keyof TownLayerVisibility) {
+  layerVisibility.value[layer] = !layerVisibility.value[layer];
+}
+
 function featureName(featureId: string): string {
   const location = selectedBundle.value?.config.locations.find((item) => item.id === featureId);
   if (location) return location.name;
@@ -414,6 +428,7 @@ onUnmounted(() => {
         :run-rate="runRate"
         :running="selectedRun?.status === 'running' && followingLatest"
         :selected-feature-id="selectedFeatureId"
+        :visibility="layerVisibility"
         @select-feature="selectedFeatureId = $event"
       />
 
@@ -482,12 +497,14 @@ onUnmounted(() => {
               :error="error"
               :draft="draft"
               :generation-loading="generationLoading"
+              :layer-visibility="layerVisibility"
               @select-scenario="selectScenario"
               @select-run="selectRun"
               @start="startRun"
               @command="command"
               @set-rate="setRate"
               @generate-town="generateTown"
+              @toggle-layer="toggleLayer"
             />
             <section v-if="selectedFeatureId" class="drawer-selection">
               <div class="section-kicker">当前焦点</div>
