@@ -40,6 +40,13 @@ FLOW_SCENARIO_DIR=/absolute/path/scenarios \
 bash scripts/dev.sh
 ```
 
+停止所有属于本项目的开发服务（包括手动指定其他端口启动的实例）：
+
+```bash
+bash scripts/stop.sh --dry-run
+bash scripts/stop.sh
+```
+
 生产静态文件由 FastAPI 托管：
 
 ```bash
