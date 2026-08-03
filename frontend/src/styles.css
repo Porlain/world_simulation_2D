@@ -73,7 +73,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, dialog:focus-vi
   gap: 6px;
   margin: 7px 0 0;
   color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: "Noto Sans SC Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -174,7 +174,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, dialog:focus-vi
   gap: 7px;
   margin-bottom: 9px;
   color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: "Noto Sans SC Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -184,7 +184,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, dialog:focus-vi
 .metric-list div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .metric-list dt { color: var(--muted); font-size: 11px; }
 .metric-list dd { max-width: 64%; margin: 0; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; font-weight: 700; overflow-wrap: anywhere; text-align: right; }
-.focus-line { display: flex; align-items: center; gap: 8px; min-height: 24px; font-family: Georgia, "Songti SC", serif; font-size: 15px; }
+.focus-line { display: flex; align-items: center; gap: 8px; min-height: 24px; font-family: "Noto Sans SC Variable", Georgia, "Songti SC", serif; font-size: 15px; }
 .focus-marker { width: 8px; height: 8px; flex: 0 0 auto; background: var(--selection); border-radius: 50%; box-shadow: 0 0 0 4px rgb(181 106 63 / 15%); }
 
 .icon-button {
@@ -310,7 +310,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, dialog:focus-vi
 .map-compass::after { position: absolute; top: 12px; width: 0; height: 0; border-right: 5px solid transparent; border-bottom: 20px solid var(--label-accent); border-left: 5px solid transparent; content: ""; }
 
 .timeline { z-index: 1100; display: grid; grid-template-columns: 150px minmax(0, 1fr) 104px; align-items: center; gap: 22px; padding: 0 22px; color: var(--ink); background: var(--paper-light); border-top: 1px solid var(--paper-line); }
-.timeline-status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.timeline-status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-family: "Noto Sans SC Variable", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .timeline-status svg { color: var(--label-accent); }
 .pulse-icon { animation: pulse 1.3s ease-in-out infinite; }
 .timeline-track { min-width: 0; }

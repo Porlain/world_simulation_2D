@@ -16,20 +16,25 @@ test("runs, pauses, seeks, and ends a city simulation", async ({ page }, testInf
 
   await page.goto("/");
   await expect(page.locator(".city-map")).toBeVisible();
-  await expect(page.locator(".brand-lockup h1")).toContainText("示例城");
+  await expect(page.locator(".map-title h1")).toContainText("示例城");
 
-  const openControls = async () => {
-    if (testInfo.project.name !== "mobile") return;
-    const open = await page.locator(".panel-shell--controls").evaluate((element) => element.classList.contains("panel-shell--open"));
-    if (!open) await page.getByRole("button", { name: "打开控制面板" }).click();
+  const openMenu = async () => {
+    const dialog = page.locator("dialog.menu-dialog");
+    if (!(await dialog.getAttribute("open"))) {
+      await page.getByRole("button", { name: "打开 Menu" }).click();
+    }
+    await expect(dialog).toBeVisible();
   };
-  const closeControls = async () => {
-    if (testInfo.project.name !== "mobile") return;
-    const open = await page.locator(".panel-shell--controls").evaluate((element) => element.classList.contains("panel-shell--open"));
-    if (open) await page.getByRole("button", { name: "打开控制面板" }).click();
+  const closeMenu = async () => {
+    const dialog = page.locator("dialog.menu-dialog");
+    if (await dialog.getAttribute("open")) {
+      await page.getByRole("button", { name: "关闭 Menu" }).click();
+    }
+    if (await dialog.isVisible()) await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
   };
 
-  await openControls();
+  await openMenu();
   await page.getByRole("button", { name: "启动模拟" }).click();
   await expect.poll(async () => Number((await page.locator(".tick-readout").innerText()).replace(/\D/g, "")), {
     timeout: 15_000,
@@ -47,7 +52,7 @@ test("runs, pauses, seeks, and ends a city simulation", async ({ page }, testInf
   });
   expect(drawn).toBe(true);
 
-  await openControls();
+  await openMenu();
   await page.getByRole("button", { name: "暂停" }).click();
   await expect(page.getByRole("button", { name: "继续" })).toBeEnabled();
   const pausedTick = Number((await page.locator(".tick-readout").innerText()).replace(/\D/g, ""));
@@ -55,7 +60,7 @@ test("runs, pauses, seeks, and ends a city simulation", async ({ page }, testInf
   await expect(page.locator(".tick-readout")).toHaveText(`T+${pausedTick.toString().padStart(4, "0")}`);
   await page.getByRole("button", { name: "继续" }).click();
   await expect.poll(async () => Number((await page.locator(".tick-readout").innerText()).replace(/\D/g, ""))).toBeGreaterThan(pausedTick);
-  await closeControls();
+  await closeMenu();
 
   const range = page.locator("input.timeline-range");
   await range.evaluate((input: HTMLInputElement) => {
@@ -66,23 +71,25 @@ test("runs, pauses, seeks, and ends a city simulation", async ({ page }, testInf
   await page.getByRole("button", { name: "返回最新" }).click();
   await expect.poll(async () => Number((await page.locator(".tick-readout").innerText()).replace(/\D/g, ""))).toBeGreaterThan(0);
 
-  await openControls();
+  await openMenu();
   page.once("dialog", (dialog) => dialog.accept());
   await page.locator("button[title='结束当前运行']").click();
   await expect(page.locator("button[title='结束当前运行']")).toBeDisabled();
-  await expect(page.locator(".topbar-readout")).toContainText("已结束");
+  await expect(page.locator(".map-title")).toContainText("已结束");
+  await closeMenu();
   await expect(page.locator("button[aria-label='播放回放']")).toBeVisible();
 
   if (testInfo.project.name === "desktop") {
-    const boxes = await page.locator(".panel-shell--controls, .map-workspace, .panel-shell--stats, .timeline").evaluateAll((elements) =>
+    const boxes = await page.locator(".map-workspace, .timeline").evaluateAll((elements) =>
       elements.map((element) => {
         const box = element.getBoundingClientRect();
         return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
       }),
     );
-    expect(boxes).toHaveLength(4);
-    expect(boxes[0].right).toBeLessThanOrEqual(boxes[1].left + 1);
-    expect(boxes[1].right).toBeLessThanOrEqual(boxes[2].left + 1);
+    expect(boxes).toHaveLength(2);
+    expect(boxes[0].left).toBe(0);
+    expect(boxes[0].right).toBe(1440);
+    expect(boxes[0].bottom).toBeLessThanOrEqual(boxes[1].top + 1);
   }
 
   await expect(page.locator("body")).toBeVisible();
@@ -97,11 +104,12 @@ test("generates a seeded town with people, vehicles, and heat", async ({ page },
   });
 
   await page.goto("/");
-  if (testInfo.project.name === "mobile") await page.getByRole("button", { name: "打开控制面板" }).click();
+  await page.getByRole("button", { name: "打开 Menu" }).click();
   await page.getByLabel("世界种子").fill("8815907750467");
   await page.getByLabel("居民数量").fill("11499");
   await page.getByRole("button", { name: "生成城镇" }).click();
-  await expect(page.locator(".map-source")).toHaveText("RADIAL-V1", { timeout: 20_000 });
+  await expect(page.locator(".map-title h1")).toHaveText("Town-8815907750467", { timeout: 20_000 });
+  await page.getByRole("button", { name: "打开 Menu" }).click();
   await expect(page.locator(".scenario-meta").filter({ hasText: "已就绪" })).toBeVisible();
 
   await page.getByRole("button", { name: "启动模拟" }).click();
@@ -112,6 +120,13 @@ test("generates a seeded town with people, vehicles, and heat", async ({ page },
   await expect(page.locator(".map-legend")).toContainText("车流");
   await expect(page.locator(".map-legend")).toContainText("热力");
   await expect(page.locator("canvas#deckgl-overlay")).toBeVisible();
+
+  await page.getByRole("button", { name: "打开 Menu" }).click();
+  await page.getByLabel("热力").uncheck();
+  await expect(page.locator(".map-legend")).not.toContainText("热力");
+  await page.getByLabel("热力").check();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("dialog.menu-dialog")).not.toBeVisible();
 
   expect(consoleErrors).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath("generated-town.png"), fullPage: true });

@@ -49,7 +49,9 @@ function fittedViewState(data: TownRenderData) {
   const height = Math.max(240, host?.height ?? 600);
   const sceneWidth = Math.max(1, data.bounds[2] - data.bounds[0]);
   const sceneHeight = Math.max(1, data.bounds[3] - data.bounds[1]);
-  const zoom = Math.log2(Math.max(0.01, Math.min((width - 110) / sceneWidth, (height - 190) / sceneHeight)));
+  const horizontalPadding = width < 600 ? 32 : 110;
+  const verticalPadding = width < 600 ? 130 : 190;
+  const zoom = Math.log2(Math.max(0.01, Math.min((width - horizontalPadding) / sceneWidth, (height - verticalPadding) / sceneHeight)));
   return {
     target: [(data.bounds[0] + data.bounds[2]) / 2, (data.bounds[1] + data.bounds[3]) / 2, 0] as [number, number, number],
     zoom,

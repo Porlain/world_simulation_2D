@@ -483,7 +483,7 @@ onUnmounted(() => {
               <p>WORLD SIMULATION / 01</p>
               <h2 id="menu-title">Menu</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="关闭 Menu" title="关闭 Menu" @click="closeMenu">
+            <button class="icon-button" type="button" aria-label="关闭 Menu" title="关闭 Menu" @click.stop="closeMenu">
               <X :size="18" aria-hidden="true" />
             </button>
           </header>

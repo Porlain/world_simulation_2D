@@ -13,8 +13,9 @@
 - FastAPI + Pydantic 的场景、run 和 command API。
 - 固定步长确定性流量引擎。
 - SQLite WAL、每 tick 快照和历史回放。
-- Vue 三栏工作台、统一时间轴和运行控制。
+- Vue 地图优先工作台、Menu 抽屉、统一时间轴和运行控制。
 - deck.gl `OrthographicView` 的本地 XY 城镇、道路和流量图层。
+- Watabou 风格纸张底图、城墙/城门/建筑印记、比例尺和指北针。
 
 当前代码不是废弃原型。以下部分继续复用：状态机、HTTP 路径、事务边界、时间轴、seeded demand、最大余数分配和自动测试。只迁移限制下一阶段的边界：
 
@@ -305,6 +306,7 @@ npm run test:e2e
 | 7 | 热力和动态 marker | 分图例、缩放无漂移、reduced motion | 已完成 |
 | 8 | 生成控件和时间轴整合 | Playwright 完整 run/replay 流程 | 已完成 |
 | 9 | 容量与开源交付 | 2000 建筑 fixture、README、第三方声明 | 已完成 |
+| 10 | 地图优先 UI | Menu 抽屉、纸张制图、功能建筑印记、图层开关、桌面/移动 E2E | 已完成 |
 
 每一行单独提交并推送；检查失败时不进入下一行。不得把格式化、无关重构或生成产物混入模块提交。
 
