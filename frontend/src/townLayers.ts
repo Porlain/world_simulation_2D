@@ -60,6 +60,8 @@ export interface TownFlowRoad extends TownFeature {
   vehicleCount: number;
   peopleDeparted: number;
   vehicleDeparted: number;
+  peopleArrived: number;
+  vehicleArrived: number;
 }
 
 interface FlowPoint {
@@ -483,14 +485,20 @@ function pathPoint(path: Coordinate[], progress: number): { position: Coordinate
   return { position: path[path.length - 1], angle: 0 };
 }
 
-function snapshotFlow(snapshot: SnapshotState, connectionId: string, flowId: string): { inTransit: number; departed: number } {
+function snapshotFlow(snapshot: SnapshotState, connectionId: string, flowId: string): { inTransit: number; departed: number; arrived: number } {
   if (snapshot.schema_version === 2) {
     const value = (snapshot as FlowSnapshot).connections[connectionId]?.[flowId];
-    return { inTransit: value?.in_transit ?? 0, departed: value?.departed ?? 0 };
+    return { inTransit: value?.in_transit ?? 0, departed: value?.departed ?? 0, arrived: value?.arrived ?? 0 };
   }
   const value = (snapshot as LegacySnapshotState).connection_activity[connectionId]?.[flowId];
   const buckets = (snapshot as LegacySnapshotState).transit_buckets[connectionId]?.[flowId] ?? [];
-  return { inTransit: buckets.reduce((sum, count) => sum + count, 0), departed: value?.departed ?? 0 };
+  return { inTransit: buckets.reduce((sum, count) => sum + count, 0), departed: value?.departed ?? 0, arrived: value?.arrived ?? 0 };
+}
+
+function flowRatio(flow: { inTransit: number; departed: number; arrived: number }, capacity: number, travelTime: number): number {
+  const occupancyRatio = flow.inTransit / Math.max(1, capacity * travelTime);
+  const tickThroughputRatio = Math.max(flow.departed, flow.arrived) / Math.max(1, capacity);
+  return Math.min(1, Math.max(occupancyRatio, tickThroughputRatio));
 }
 
 function flowLocationCount(snapshot: SnapshotState, locationId: string, flowId: string): number {
@@ -533,12 +541,10 @@ export function assembleTownFlowData(
   }
 
   for (const connection of connections) {
-    const peopleFlow = people ? snapshotFlow(snapshot, connection.id, people) : { inTransit: 0, departed: 0 };
-    const vehicleFlow = vehicle ? snapshotFlow(snapshot, connection.id, vehicle) : { inTransit: 0, departed: 0 };
-    const peopleCapacity = Math.max(1, (connection.capacity[people ?? ""] ?? 0) * (connection.travelTime[people ?? ""] ?? 1));
-    const vehicleCapacity = Math.max(1, (connection.capacity[vehicle ?? ""] ?? 0) * (connection.travelTime[vehicle ?? ""] ?? 1));
-    const peopleRatio = Math.min(1, peopleFlow.inTransit / peopleCapacity);
-    const vehicleRatio = Math.min(1, vehicleFlow.inTransit / vehicleCapacity);
+    const peopleFlow = people ? snapshotFlow(snapshot, connection.id, people) : { inTransit: 0, departed: 0, arrived: 0 };
+    const vehicleFlow = vehicle ? snapshotFlow(snapshot, connection.id, vehicle) : { inTransit: 0, departed: 0, arrived: 0 };
+    const peopleRatio = flowRatio(peopleFlow, connection.capacity[people ?? ""] ?? 0, connection.travelTime[people ?? ""] ?? 1);
+    const vehicleRatio = flowRatio(vehicleFlow, connection.capacity[vehicle ?? ""] ?? 0, connection.travelTime[vehicle ?? ""] ?? 1);
     roads.push({
       id: connection.id,
       name: connection.id,
@@ -550,6 +556,8 @@ export function assembleTownFlowData(
       vehicleCount: vehicleFlow.inTransit,
       peopleDeparted: peopleFlow.departed,
       vehicleDeparted: vehicleFlow.departed,
+      peopleArrived: peopleFlow.arrived,
+      vehicleArrived: vehicleFlow.arrived,
     });
 
     for (let sample = 0; sample < 7; sample += 1) {

@@ -85,6 +85,13 @@ function connectionDeparted(connectionId: string, flowTypeId: string): number {
   return snapshot.connection_activity[connectionId]?.[flowTypeId]?.departed ?? 0;
 }
 
+function connectionArrived(connectionId: string, flowTypeId: string): number {
+  const snapshot = displayedSnapshot.value;
+  if (!snapshot) return 0;
+  if (snapshot.schema_version === 2) return snapshot.connections[connectionId]?.[flowTypeId]?.arrived ?? 0;
+  return snapshot.connection_activity[connectionId]?.[flowTypeId]?.arrived ?? 0;
+}
+
 function normalizeError(value: unknown): ApiError {
   if (value instanceof ApiError) return value;
   return new ApiError(0, "client_error", "页面遇到未预期的问题。");
@@ -446,6 +453,7 @@ onUnmounted(() => {
         </dl>
         <dl v-else-if="selectedConnection && displayedSnapshot && flowId" class="metric-list">
           <div><dt>刚刚出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, flowId)) }}</dd></div>
+          <div><dt>刚刚到达</dt><dd>{{ formatNumber(connectionArrived(selectedConnection.id, flowId)) }}</dd></div>
           <div><dt>道路容量</dt><dd>{{ formatNumber(selectedConnection.capacity_per_tick[flowId] ?? 0) }} / 秒</dd></div>
           <div><dt>旅行时间</dt><dd>{{ selectedConnection.travel_time_ticks }} 秒</dd></div>
         </dl>
@@ -486,6 +494,7 @@ onUnmounted(() => {
               </dl>
               <dl v-else-if="selectedConnection && displayedSnapshot && flowId" class="metric-list">
                 <div><dt>刚刚出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, flowId)) }}</dd></div>
+                <div><dt>刚刚到达</dt><dd>{{ formatNumber(connectionArrived(selectedConnection.id, flowId)) }}</dd></div>
                 <div><dt>道路容量</dt><dd>{{ formatNumber(selectedConnection.capacity_per_tick[flowId] ?? 0) }} / 秒</dd></div>
                 <div><dt>旅行时间</dt><dd>{{ selectedConnection.travel_time_ticks }} 秒</dd></div>
               </dl>

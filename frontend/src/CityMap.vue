@@ -50,8 +50,9 @@ function tooltipText(object: TownFeature): string {
     return [
       `道路 ${road.id}`,
       `人流：${Math.round(road.peopleCount).toLocaleString("zh-CN")} 人在途`,
+      `人流本 tick：出发 ${Math.round(road.peopleDeparted).toLocaleString("zh-CN")} / 到达 ${Math.round(road.peopleArrived).toLocaleString("zh-CN")}`,
       `车流：${Math.round(road.vehicleCount).toLocaleString("zh-CN")} 辆在途`,
-      `累计出发：${Math.round(road.peopleDeparted).toLocaleString("zh-CN")} 人 / ${Math.round(road.vehicleDeparted).toLocaleString("zh-CN")} 辆`,
+      `车流本 tick：出发 ${Math.round(road.vehicleDeparted).toLocaleString("zh-CN")} / 到达 ${Math.round(road.vehicleArrived).toLocaleString("zh-CN")}`,
     ].join("\n");
   }
   return object.name;

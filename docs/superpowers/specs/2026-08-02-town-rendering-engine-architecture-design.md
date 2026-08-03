@@ -552,7 +552,7 @@ coordinateSystem = CARTESIAN
 11 selection           PolygonLayer / PathLayer
 ```
 
-道路热度不是普通 KDE 热斑。它复用道路 path，以 `in_transit/capacity` 映射透明度、颜色和宽度，使高流量仍被约束在街道上。地点人流热力使用 `HeatmapLayer`，必须设置固定 `colorDomain`，避免缩放改变图例语义。
+道路热度不是普通 KDE 热斑。它复用道路 path，以 `in_transit` 存量占容量和当前 tick 的 `departed`/`arrived` 吞吐占容量中的较大值映射透明度、颜色和宽度，使高流量仍被约束在街道上。地点人流热力使用 `HeatmapLayer`，必须设置固定 `colorDomain`，避免缩放改变图例语义。
 
 ### 10.3 更新频率
 
