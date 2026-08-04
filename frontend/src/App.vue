@@ -171,7 +171,14 @@ function locationFlowStats(locationId: string, flowTypeId: string | null) {
   const bundle = selectedBundle.value;
   if (!snapshot || !bundle || !flowTypeId) return null;
   const connections = bundle.simulation_package?.connections ?? bundle.config.connections;
-  const stats = { occupants: snapshot.location_counts[locationId]?.[flowTypeId] ?? 0, departed: 0, arrived: 0, approaching: 0 };
+  const location = bundle.config.locations.find((item) => item.id === locationId);
+  const stats = {
+    registered: location?.initial_counts[flowTypeId] ?? 0,
+    occupants: snapshot.location_counts[locationId]?.[flowTypeId] ?? 0,
+    departed: 0,
+    arrived: 0,
+    approaching: 0,
+  };
   for (const connection of connections) {
     const activity = connectionActivity(connection.id, flowTypeId);
     if (connection.from_location_id === locationId) {
@@ -554,7 +561,8 @@ onUnmounted(() => {
           <div v-if="selectedLocationStats.people" class="flow-stats-block">
             <div class="section-kicker">人流</div>
             <dl class="metric-list">
-              <div><dt>建筑内</dt><dd>{{ formatNumber(selectedLocationStats.people.occupants) }}</dd></div>
+              <div><dt>登记人口</dt><dd>{{ formatNumber(selectedLocationStats.people.registered) }}</dd></div>
+              <div><dt>当前建筑内</dt><dd>{{ formatNumber(selectedLocationStats.people.occupants) }}</dd></div>
               <div><dt>本 tick 经过</dt><dd>{{ formatNumber(selectedLocationStats.people.departed + selectedLocationStats.people.arrived) }}</dd></div>
               <div><dt>本 tick 出发</dt><dd>{{ formatNumber(selectedLocationStats.people.departed) }}</dd></div>
               <div><dt>本 tick 到达</dt><dd>{{ formatNumber(selectedLocationStats.people.arrived) }}</dd></div>
@@ -564,7 +572,8 @@ onUnmounted(() => {
           <div v-if="selectedLocationStats.vehicle" class="flow-stats-block">
             <div class="section-kicker">车流</div>
             <dl class="metric-list">
-              <div><dt>建筑内</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.occupants) }}</dd></div>
+              <div><dt>登记车辆</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.registered) }}</dd></div>
+              <div><dt>当前驻留</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.occupants) }}</dd></div>
               <div><dt>本 tick 经过</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.departed + selectedLocationStats.vehicle.arrived) }}</dd></div>
               <div><dt>本 tick 出发</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.departed) }}</dd></div>
               <div><dt>本 tick 到达</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.arrived) }}</dd></div>
@@ -572,7 +581,7 @@ onUnmounted(() => {
             </dl>
           </div>
           <div v-if="selectedAggregateDistricts.length || selectedAggregateBuildings.length" class="aggregation-block">
-            <div class="section-kicker">聚合范围</div>
+            <div class="section-kicker">统计范围</div>
             <div v-if="selectedAggregateDistricts.length" class="aggregation-group">
               <span class="aggregation-label">居民区（{{ selectedAggregateDistricts.length }}）</span>
               <ul class="aggregation-list">
@@ -632,7 +641,8 @@ onUnmounted(() => {
                 <div v-if="selectedLocationStats.people" class="flow-stats-block">
                   <div class="section-kicker">人流</div>
                   <dl class="metric-list">
-                    <div><dt>建筑内</dt><dd>{{ formatNumber(selectedLocationStats.people.occupants) }}</dd></div>
+                    <div><dt>登记人口</dt><dd>{{ formatNumber(selectedLocationStats.people.registered) }}</dd></div>
+                    <div><dt>当前建筑内</dt><dd>{{ formatNumber(selectedLocationStats.people.occupants) }}</dd></div>
                     <div><dt>本 tick 经过</dt><dd>{{ formatNumber(selectedLocationStats.people.departed + selectedLocationStats.people.arrived) }}</dd></div>
                     <div><dt>本 tick 出发</dt><dd>{{ formatNumber(selectedLocationStats.people.departed) }}</dd></div>
                     <div><dt>本 tick 到达</dt><dd>{{ formatNumber(selectedLocationStats.people.arrived) }}</dd></div>
@@ -642,7 +652,8 @@ onUnmounted(() => {
                 <div v-if="selectedLocationStats.vehicle" class="flow-stats-block">
                   <div class="section-kicker">车流</div>
                   <dl class="metric-list">
-                    <div><dt>建筑内</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.occupants) }}</dd></div>
+                    <div><dt>登记车辆</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.registered) }}</dd></div>
+                    <div><dt>当前驻留</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.occupants) }}</dd></div>
                     <div><dt>本 tick 经过</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.departed + selectedLocationStats.vehicle.arrived) }}</dd></div>
                     <div><dt>本 tick 出发</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.departed) }}</dd></div>
                     <div><dt>本 tick 到达</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.arrived) }}</dd></div>
@@ -650,7 +661,7 @@ onUnmounted(() => {
                   </dl>
                 </div>
                 <div v-if="selectedAggregateDistricts.length || selectedAggregateBuildings.length" class="aggregation-block">
-                  <div class="section-kicker">聚合范围</div>
+                  <div class="section-kicker">统计范围</div>
                   <div v-if="selectedAggregateDistricts.length" class="aggregation-group">
                     <span class="aggregation-label">居民区（{{ selectedAggregateDistricts.length }}）</span>
                     <ul class="aggregation-list">

@@ -22,7 +22,10 @@ FLOW_TYPES = (
     FlowTypeConfig(id="pedestrian", unit="people", label="人流"),
     FlowTypeConfig(id="vehicle", unit="vehicles", label="车流"),
 )
-MAX_FLOW_LOCATIONS = 48
+# A generated town has at most 8 * 32 districts. Keeping one flow location
+# per district prevents the overview from hiding most of the town behind a
+# handful of sampled nodes; a later building-detail view can refine this.
+MAX_FLOW_LOCATIONS = 320
 
 
 class FlowCompileError(ValueError):
@@ -335,47 +338,127 @@ def _choose_edges(
             index = parent[index]
         return index
 
-    selected: set[tuple[int, int]] = set()
     result: list[tuple[int, int, _Route]] = []
     for left_index, right_index, route in pairs:
         left_root, right_root = find(left_index), find(right_index)
         if left_root == right_root:
             continue
         parent[left_root] = right_root
-        selected.add((left_index, right_index))
         result.append((left_index, right_index, route))
     if len(result) != len(candidates) - 1:
         raise FlowCompileError("street graph cannot connect all flow locations")
 
-    for index, candidate in enumerate(candidates):
-        neighbors = sorted(
-            (
-                (other_index, routes[(candidate.location.id, other.location.id)])
-                if (candidate.location.id, other.location.id) in routes
-                else (other_index, _reverse_route(routes[(other.location.id, candidate.location.id)]))
-                for other_index, other in enumerate(candidates)
-                if other_index != index
-                and (
-                    (candidate.location.id, other.location.id) in routes
-                    or (other.location.id, candidate.location.id) in routes
-                )
-            ),
-            key=lambda item: (item[1].distance, candidates[item[0]].location.id),
-        )
-        added = 0
-        for other_index, route in neighbors:
-            key = (min(index, other_index), max(index, other_index))
-            if key in selected:
-                continue
-            left_index, right_index = key
-            if index != left_index:
-                route = _reverse_route(route)
-            selected.add(key)
-            result.append((left_index, right_index, route))
-            added += 1
-            if added == 2:
-                break
     return sorted(result, key=lambda item: (item[0], item[1]))
+
+
+def _route_via_street(
+    candidates: list[_Candidate],
+    street: TownStreet,
+    junctions_by_id: dict[str, TownJunction],
+    location_junctions: dict[str, TownJunction],
+    junction_routes: dict[str, dict[str, _Route]],
+) -> tuple[int, int, _Route] | None:
+    """Build a deterministic OD route that explicitly crosses one street.
+
+    The sparse OD graph still provides the town's normal demand structure. This
+    second pass adds a route for physical streets that do not occur in that
+    graph, keeping traffic tied to the generated street network instead of
+    making unused roads decorative only.
+    """
+    source_options = sorted(
+        enumerate(candidates),
+        key=lambda item: (
+            location_junctions[item[1].location.id].id != street.from_junction_id,
+            _distance(item[1].location.position, junctions_by_id[street.from_junction_id].position),
+            item[1].location.id,
+        ),
+    )
+    target_options = sorted(
+        enumerate(candidates),
+        key=lambda item: (
+            location_junctions[item[1].location.id].id != street.to_junction_id,
+            _distance(item[1].location.position, junctions_by_id[street.to_junction_id].position),
+            item[1].location.id,
+        ),
+    )
+    for source_index, source in source_options[:32]:
+        source_junction = location_junctions[source.location.id]
+        left = junction_routes[source_junction.id].get(street.from_junction_id)
+        if left is None or street.id in left.street_ids:
+            continue
+        for target_index, target in target_options[:32]:
+            if source_index == target_index:
+                continue
+            target_junction = location_junctions[target.location.id]
+            right = junction_routes[target_junction.id].get(street.to_junction_id)
+            if right is None or street.id in right.street_ids:
+                continue
+            path: list[tuple[float, float]] = []
+            _append_point(path, source.location.position)
+            for point in left.path:
+                _append_point(path, point)
+            for point in street.path:
+                _append_point(path, point)
+            for point in reversed(right.path):
+                _append_point(path, point)
+            _append_point(path, target.location.position)
+            street_ids = tuple(left.street_ids) + (street.id,) + tuple(reversed(right.street_ids))
+            return source_index, target_index, _Route(_polyline_length(path), street_ids, tuple(path))
+    fallback: list[tuple[int, float, str, str, int, int, _Route]] = []
+    for source_index, source in source_options[:32]:
+        source_junction = location_junctions[source.location.id]
+        left = junction_routes[source_junction.id].get(street.from_junction_id)
+        if left is None:
+            continue
+        for target_index, target in target_options[:32]:
+            if source_index == target_index:
+                continue
+            target_junction = location_junctions[target.location.id]
+            right = junction_routes[target_junction.id].get(street.to_junction_id)
+            if right is None:
+                continue
+            path: list[tuple[float, float]] = []
+            _append_point(path, source.location.position)
+            for point in left.path:
+                _append_point(path, point)
+            for point in street.path:
+                _append_point(path, point)
+            for point in reversed(right.path):
+                _append_point(path, point)
+            _append_point(path, target.location.position)
+            street_ids = tuple(left.street_ids) + (street.id,) + tuple(reversed(right.street_ids))
+            repeated = int(street.id in left.street_ids) + int(street.id in right.street_ids)
+            route = _Route(_polyline_length(path), street_ids, tuple(path))
+            fallback.append((repeated, route.distance, source.location.id, target.location.id, source_index, target_index, route))
+    if fallback:
+        _, _, _, _, source_index, target_index, route = min(fallback)
+        return source_index, target_index, route
+    return None
+
+
+def _add_street_coverage_routes(
+    selected_edges: list[tuple[int, int, _Route]],
+    candidates: list[_Candidate],
+    streets: list[TownStreet],
+    junctions_by_id: dict[str, TownJunction],
+    location_junctions: dict[str, TownJunction],
+    junction_routes: dict[str, dict[str, _Route]],
+) -> list[tuple[int, int, _Route]]:
+    used_streets = {street_id for _, _, route in selected_edges for street_id in route.street_ids}
+    result = list(selected_edges)
+    for street in sorted(streets, key=lambda item: item.id):
+        if street.id in used_streets:
+            continue
+        route = _route_via_street(candidates, street, junctions_by_id, location_junctions, junction_routes)
+        if route is None:
+            continue
+        source_index, target_index, oriented = route
+        if source_index > target_index:
+            source_index, target_index = target_index, source_index
+            oriented = _reverse_route(oriented)
+        result.append((source_index, target_index, oriented))
+        used_streets.update(oriented.street_ids)
+    return sorted(result, key=lambda item: (item[0], item[1], item[2].street_ids))
 
 
 def _connection(
@@ -442,6 +525,16 @@ def compile_flow(town: TownSkeleton) -> SimulationPackage:
             if route is not None:
                 routes[(source.location.id, target.location.id)] = route
     selected_edges = _choose_edges(candidates, routes)
+    junction_routes = {junction.id: _dijkstra(graph, junction.id) for junction in junctions}
+    junctions_by_id = {junction.id: junction for junction in junctions}
+    selected_edges = _add_street_coverage_routes(
+        selected_edges,
+        candidates,
+        list(streets_by_id.values()),
+        junctions_by_id,
+        location_junctions,
+        junction_routes,
+    )
 
     pedestrian_counts = _allocate_total(town.requested_population, candidates)
     vehicle_counts = _allocate_total(town.initial_vehicle_count, candidates)

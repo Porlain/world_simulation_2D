@@ -55,7 +55,6 @@ deck.gl 以 standalone `Deck` 类接入 Vue，不安装 React、MapLibre 或完�
 ```text
 @deck.gl/core
 @deck.gl/layers
-@deck.gl/aggregation-layers
 ```
 
 `@deck.gl/geo-layers` 只有 3.0 世界瓦片或经验证需要 `TripsLayer` 时才增加。
@@ -215,14 +214,14 @@ FlowBindings
   connection_street_ids: connection_id -> [street segment ids]
 ```
 
-`StreetGraph` 可以包含数千段；`FlowGraph` 最多 48 个地点。城门、广场和唯一功能地标优先进入，剩余名额按稳定 ID 从区中心均匀抽取。`FlowCompiler` 使用标准库 `heapq` 在 StreetGraph 上生成稳定最短路，邻接边按 ID 排序解决等长路径的不确定性。
+`StreetGraph` 可以包含数千段；`radial-v1` 为每个生成街区建立一个 FlowLocation，并为城门、广场和唯一功能地标保留独立地点。`FlowCompiler` 使用标准库 `heapq` 在 StreetGraph 上生成稳定最短路，邻接边按 ID 排序解决等长路径的不确定性。
 
 连边步骤固定为：
 
 1. 将每个 FlowLocation 绑定到最近 junction，距离相同时取 junction ID 较小者。
 2. 对 FlowLocation 两两计算最短街道距离。
 3. 用稳定 Kruskal 最小生成树保证整个 FlowGraph 连通。
-4. 再为每个地点加入距离最近的两个尚未连接地点，形成环路。
+4. 对尚未进入任何路线的物理街道补充一条固定起终点的备用路线。
 5. 每个无向结果输出两个有向 FlowConnection，反向连接反转 segment IDs 和 path。
 
 每个连接按实际 path 长度和最窄 street width 生成默认参数：
@@ -544,7 +543,7 @@ coordinateSystem = CARTESIAN
 03 road-base           PathLayer
 04 road-vehicle-heat   PathLayer
 05 building-fill       PolygonLayer
-06 location-heat       HeatmapLayer
+06 street-heat         PathLayer
 07 landmark-symbols    PolygonLayer
 08 pedestrian-markers  ScatterplotLayer
 09 vehicle-markers     PolygonLayer
@@ -552,7 +551,7 @@ coordinateSystem = CARTESIAN
 11 selection           PolygonLayer / PathLayer
 ```
 
-道路热度不是普通 KDE 热斑。它通过 `connection_street_ids` 将共享街段的连接统计聚合到物理 TownStreet，再以 `in_transit` 存量占容量和当前 tick 的 `departed`/`arrived` 吞吐占容量中的较大值映射透明度、颜色和宽度，使高流量仍被约束在街道上。该版本展示的是关联线路负载；若要得到精确街段驻留，需要在快照中保存街段级队列。地点人流热力使用 `HeatmapLayer`，必须设置固定 `colorDomain`，避免缩放改变图例语义。
+道路热度不使用 KDE 热斑。它通过 `connection_street_ids` 将共享街段的连接统计聚合到物理 TownStreet，再按同一 snapshot 内的绝对 `in_transit` 归一化映射透明度、颜色和宽度；因此高流量始终被约束在街道上，且同一 tick 内数值更大的街道一定更醒目。该版本展示的是关联线路负载；若要得到精确街段驻留，需要在快照中保存街段级队列。
 
 ### 10.3 更新频率
 
@@ -731,7 +730,6 @@ uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
 - [deck.gl OrthographicView](https://deck.gl/docs/api-reference/core/orthographic-view)：本地 XY 顶视图。
 - [deck.gl layer catalog](https://deck.gl/docs/api-reference/layers)：核心多边形、路径、图标、点和文本图层。
 - [deck.gl performance guide](https://deck.gl/docs/developer-guide/performance)：保持静态 data 稳定，按需使用 typed arrays。
-- [deck.gl HeatmapLayer](https://deck.gl/docs/api-reference/aggregation-layers/heatmap-layer)：GPU 热力与移动平台限制。
 - [Azgaar Fantasy Map Generator](https://github.com/Azgaar/Fantasy-Map-Generator)：借鉴 world data、generator、editor、renderer 分离，不复制业务代码。
 - [Watabou Medieval Fantasy City Generator](https://watabou.itch.io/medieval-fantasy-city-generator)：作为视觉参考和导出来源。
 - [TownGeneratorOS](https://github.com/watabou/TownGeneratorOS)：GPL-3.0 且落后于线上版本，不复制源码。

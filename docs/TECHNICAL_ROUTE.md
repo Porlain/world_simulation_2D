@@ -144,8 +144,8 @@ RenderPackage
 5. 相邻环与扇区形成四边形街区。
 6. 使用双线性插值在街区内生成 1 到 8 个建筑 footprint，达到目标数量后停止。
 7. 依据中心、城门和外圈距离分配行政、市场、宗教、军事、仓储、工坊、马厩和住宅。
-8. 从城门、区中心、广场和地标构建最多 48 个节点的稀疏 FlowGraph。
-9. 使用稳定 Dijkstra 计算路径，Kruskal 最小生成树保证连通，再为每个地点补两个最近邻形成环路。
+8. 城门、广场和唯一地标各自建立地点；每个生成街区建立一个独立 FlowLocation。`radial-v1` 最多生成 256 个街区，不再把正常规模城镇压缩成少量采样节点。
+9. 使用稳定 Dijkstra 计算路径，Kruskal 最小生成树保证地点连通；对仍未被使用的物理街道补一条固定起终点的确定性备用路线，保证生成道路全部进入 FlowGraph，同时避免为每个地点盲目增加重复近邻连接。
 10. 使用最大余数法分配居民，保证 pedestrian 初始总数严格等于输入人口；vehicle 单独守恒。
 
 每个随机值由 `sha256(generator_version, seed, namespace, ordinal)` 派生，不读取全局 `random` 状态。
@@ -190,7 +190,7 @@ SimulationState
 
 新快照不保存 `transit_buckets`。历史 v1 JSON 由后端读取适配器求和为 `in_transit`，API 始终向 Vue 返回 v2。旧场景的地点和连接由 `LegacyRenderAdapter` 转成最小 deck.gl 地标与道路，因此旧回放仍可读，但不会伪造原数据中不存在的建筑。
 
-道路统计同时读取连接快照的 `in_transit`、`departed` 和 `arrived`：前者是当前道路存量，后两者是当前 tick 的出发/到达事件，不是累计值。生成场景必须通过 `street_segment_ids` 将共享同一物理街段的 FlowConnection 聚合到 TownStreet，不能直接拾取互相重叠的连接路径。道路视觉强度取存量占容量和当前 tick 吞吐占容量中的较大值，悬停提示分别展示三种口径。由于 v2 快照仍是连接级队列，街段值表示关联线路负载；精确街段驻留需要新增街段级快照。
+道路统计同时读取连接快照的 `in_transit`、`departed` 和 `arrived`：前者是当前道路存量，后两者是当前 tick 的出发/到达事件，不是累计值。生成场景通过 `street_segment_ids` 将共享同一物理街段的 FlowConnection 聚合到 TownStreet。热度带按当前物理街道的绝对 `in_transit` 在同一 snapshot 内归一化，因此同一 tick 内人数更多的街道颜色一定更强；`departed` 和 `arrived` 单独保留在悬停提示中。由于 v2 快照仍是连接级队列，街段值表示关联线路负载；精确到人员在某一段道路上的位置仍需要街段级队列。
 
 每个 flow type 都检查：
 
@@ -221,18 +221,17 @@ Vue 使用 standalone `Deck` 和一个 `OrthographicView`，所有图层使用�
 | 1 | 街区底色 | PolygonLayer | 场景切换 |
 | 2 | 边界、城墙 | PathLayer | 场景切换 |
 | 3 | 道路底图 | PathLayer | 场景切换 |
-| 4 | 人流/车流道路热度带 | PathLayer | snapshot |
+| 4 | 人流/车流绝对流量热度带 | PathLayer | snapshot |
 | 5 | 建筑 footprint | PolygonLayer | 场景切换 |
-| 6 | 地点人流热力 | HeatmapLayer | snapshot |
-| 7 | 功能地标 | PolygonLayer + TextLayer | 场景切换/选择 |
-| 8 | 人流采样 | ScatterplotLayer | snapshot tick |
-| 9 | 车辆采样 | PolygonLayer | snapshot tick |
-| 10 | 标签、选择 | Text/Polygon/Path | 选择变化 |
+| 6 | 功能地标 | PolygonLayer + TextLayer | 场景切换/选择 |
+| 7 | 人流采样 | ScatterplotLayer | snapshot tick |
+| 8 | 车辆采样 | PolygonLayer | snapshot tick |
+| 9 | 标签、选择 | Text/Polygon/Path | 选择变化 |
 
 实现规则：
 
 - 静态 geometry 数组在 tick 间保持同一引用。
-- `HeatmapLayer` 使用固定颜色范围，图例不会随缩放改变含义。
+- 热度带使用物理街道绝对在途量归一化，不使用会把相邻道路密度混在一起的 KDE 热斑。
 - 道路热度复用 street path，不把车流扩散到建筑上。
 - 动态 marker 最多约 1,000 个；每条 connection/type 按流量上限抽样 slot，并在前端按固定公式裁剪。
 - marker 位置通过 path 累计弧长插值，和道路处于同一个 Deck 世界坐标。

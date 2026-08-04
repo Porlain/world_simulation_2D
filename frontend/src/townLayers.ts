@@ -1,5 +1,4 @@
 import { COORDINATE_SYSTEM, type Color, type Layer } from "@deck.gl/core";
-import { HeatmapLayer } from "@deck.gl/aggregation-layers";
 import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import type {
   BuildingKind,
@@ -67,11 +66,6 @@ export interface TownFlowRoad extends TownFeature {
   vehicleArrived: number;
 }
 
-interface FlowPoint {
-  position: Coordinate;
-  weight: number;
-}
-
 interface FlowMarker extends TownFeature {
   position: Coordinate;
   flow: "people" | "vehicle";
@@ -82,8 +76,6 @@ interface FlowMarker extends TownFeature {
 }
 
 export interface TownFlowRenderData {
-  peopleHeat: FlowPoint[];
-  vehicleHeat: FlowPoint[];
   roads: TownFlowRoad[];
   peopleMarkers: FlowMarker[];
   vehicleMarkers: FlowMarker[];
@@ -576,11 +568,14 @@ function aggregatePhysicalRoads(
     }
   });
 
-  return [...aggregated.values()];
-}
-
-function flowLocationCount(snapshot: SnapshotState, locationId: string, flowId: string): number {
-  return snapshot.location_counts[locationId]?.[flowId] ?? 0;
+  const roads = [...aggregated.values()];
+  const peopleMax = Math.max(1, ...roads.map((road) => road.peopleCount));
+  const vehicleMax = Math.max(1, ...roads.map((road) => road.vehicleCount));
+  for (const road of roads) {
+    road.peopleRatio = road.peopleCount / peopleMax;
+    road.vehicleRatio = road.vehicleCount / vehicleMax;
+  }
+  return roads;
 }
 
 function markerPolygon(position: Coordinate, size: number, angle: number): Coordinate[] {
@@ -605,20 +600,11 @@ export function assembleTownFlowData(
 ): TownFlowRenderData {
   const { people, vehicle } = flowIds(bundle);
   const connections = flowConnections(bundle);
-  const peopleHeat: FlowPoint[] = [];
-  const vehicleHeat: FlowPoint[] = [];
   const roads: TownFlowRoad[] = [];
   const peopleMarkers: FlowMarker[] = [];
   const vehicleMarkers: FlowMarker[] = [];
   const locationEntries = flowLocations(bundle);
   const locationNames = new Map(locationEntries.map((location) => [location.id, location.name]));
-  const peopleLocationMax = Math.max(1, ...locationEntries.map((location) => people ? flowLocationCount(snapshot, location.id, people) : 0));
-  const vehicleLocationMax = Math.max(1, ...locationEntries.map((location) => vehicle ? flowLocationCount(snapshot, location.id, vehicle) : 0));
-
-  for (const location of locationEntries) {
-    if (people) peopleHeat.push({ position: location.position, weight: flowLocationCount(snapshot, location.id, people) / peopleLocationMax });
-    if (vehicle) vehicleHeat.push({ position: location.position, weight: flowLocationCount(snapshot, location.id, vehicle) / vehicleLocationMax });
-  }
 
   for (const connection of connections) {
     const peopleFlow = people ? snapshotFlow(snapshot, connection.id, people) : { inTransit: 0, departed: 0, arrived: 0 };
@@ -642,12 +628,6 @@ export function assembleTownFlowData(
       peopleArrived: peopleFlow.arrived,
       vehicleArrived: vehicleFlow.arrived,
     });
-
-    for (let sample = 0; sample < 7; sample += 1) {
-      const point = pathPoint(connection.path, sample / 6);
-      if (peopleRatio > 0) peopleHeat.push({ position: point.position, weight: peopleRatio });
-      if (vehicleRatio > 0) vehicleHeat.push({ position: point.position, weight: vehicleRatio });
-    }
 
     const addMarkers = (flow: "people" | "vehicle", count: number, travelTime: number, target: FlowMarker[]) => {
       const markerCount = Math.min(flow === "vehicle" ? 18 : 30, Math.max(0, Math.ceil(count / (flow === "vehicle" ? 2 : 18))));
@@ -673,25 +653,31 @@ export function assembleTownFlowData(
     if (people) addMarkers("people", peopleFlow.inTransit, connection.travelTime[people] ?? 1, peopleMarkers);
     if (vehicle) addMarkers("vehicle", vehicleFlow.inTransit, connection.travelTime[vehicle] ?? 1, vehicleMarkers);
   }
-  return { peopleHeat, vehicleHeat, roads: aggregatePhysicalRoads(bundle, roads, connections), peopleMarkers, vehicleMarkers };
+  const physicalRoads = aggregatePhysicalRoads(bundle, roads, connections);
+  return { roads: physicalRoads, peopleMarkers, vehicleMarkers };
 }
 
-function heatLayer(
+function heatRoadLayer(
   id: string,
-  data: FlowPoint[],
-  colorRange: Color[],
+  data: TownFlowRoad[],
+  flow: "people" | "vehicle",
 ): Layer {
-  return new HeatmapLayer<FlowPoint>({
+  return new PathLayer<TownFlowRoad>({
     id,
     data,
     coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
-    getPosition: (point) => point.position,
-    getWeight: (point) => point.weight,
-    radiusPixels: 26,
-    intensity: 1.25,
-    threshold: 0.035,
-    colorDomain: [0, 4],
-    colorRange,
+    widthUnits: "pixels",
+    capRounded: true,
+    jointRounded: true,
+    getPath: (road) => road.path,
+    getColor: (road) => {
+      const ratio = flow === "people" ? road.peopleRatio : road.vehicleRatio;
+      if (ratio <= 0) return [0, 0, 0, 0];
+      return flow === "people"
+        ? [36 + Math.round(189 * ratio), 196 - Math.round(121 * ratio), 187 - Math.round(122 * ratio), 45 + Math.round(155 * ratio)]
+        : [42 + Math.round(189 * ratio), 165 - Math.round(93 * ratio), 221 - Math.round(108 * ratio), 40 + Math.round(155 * ratio)];
+    },
+    getWidth: (road) => 6 + (flow === "people" ? road.peopleRatio : road.vehicleRatio) * 10,
     pickable: false,
   });
 }
@@ -719,18 +705,8 @@ export function createDynamicTownLayers(
       getColor: [0, 0, 0, 0],
       getWidth: 12,
     })] : []),
-    ...(visibility.heat && data.peopleHeat.length ? [heatLayer("people-heat", data.peopleHeat, [
-      [33, 132, 153, 0],
-      [36, 196, 187, 72],
-      [247, 192, 70, 170],
-      [225, 75, 65, 220],
-    ])] : []),
-    ...(visibility.heat && data.vehicleHeat.length ? [heatLayer("vehicle-heat", data.vehicleHeat, [
-      [31, 99, 173, 0],
-      [42, 165, 221, 78],
-      [126, 111, 224, 168],
-      [231, 72, 113, 220],
-    ])] : []),
+    ...(visibility.heat && visibility.people ? [heatRoadLayer("people-heat", data.roads, "people")] : []),
+    ...(visibility.heat && visibility.vehicles ? [heatRoadLayer("vehicle-heat", data.roads, "vehicle")] : []),
     ...(visibility.people ? [new PathLayer<TownFlowRoad>({
       id: "people-flow-roads",
       data: data.roads,

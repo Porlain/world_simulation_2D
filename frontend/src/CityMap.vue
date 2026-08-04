@@ -91,7 +91,13 @@ function locationTooltipText(locationId: string): string | null {
   const connections = bundle.simulation_package?.connections ?? bundle.config.connections;
   const statsFor = (flowId: string | null) => {
     if (!flowId) return null;
-    const stats = { occupants: snapshot.location_counts[locationId]?.[flowId] ?? 0, inTransit: 0, departed: 0, arrived: 0 };
+    const stats = {
+      registered: location.initial_counts[flowId] ?? 0,
+      occupants: snapshot.location_counts[locationId]?.[flowId] ?? 0,
+      inTransit: 0,
+      departed: 0,
+      arrived: 0,
+    };
     for (const connection of connections) {
       if (connection.from_location_id !== locationId && connection.to_location_id !== locationId) continue;
       const activity = snapshotFlowValue(snapshot, connection.id, flowId);
@@ -111,14 +117,16 @@ function locationTooltipText(locationId: string): string | null {
       .map((district) => district.id.replace(/^district-/, "").toUpperCase())
     : [];
   const lines = [location.name];
-  if (districtLabels.length) lines.push(`聚合居民区：${districtLabels.join("、")}`);
+  if (districtLabels.length) {
+    lines.push(`${districtLabels.length > 1 ? "聚合居民区" : "统计居民区"}：${districtLabels.join("、")}`);
+  }
   if (people) {
-    lines.push(`人流 · 建筑内 ${Math.round(people.occupants).toLocaleString("zh-CN")} 人`);
+    lines.push(`人流 · 登记 ${Math.round(people.registered).toLocaleString("zh-CN")} / 当前建筑内 ${Math.round(people.occupants).toLocaleString("zh-CN")} 人`);
     lines.push(`人流 · 道路在途 ${Math.round(people.inTransit).toLocaleString("zh-CN")} 人`);
     lines.push(`人流 · 本 tick 出发 ${Math.round(people.departed).toLocaleString("zh-CN")} / 经过 ${Math.round(people.departed + people.arrived).toLocaleString("zh-CN")} / 到达 ${Math.round(people.arrived).toLocaleString("zh-CN")}`);
   }
   if (vehicles) {
-    lines.push(`车流 · 建筑内 ${Math.round(vehicles.occupants).toLocaleString("zh-CN")} 辆`);
+    lines.push(`车流 · 登记 ${Math.round(vehicles.registered).toLocaleString("zh-CN")} / 当前驻留 ${Math.round(vehicles.occupants).toLocaleString("zh-CN")} 辆`);
     lines.push(`车流 · 道路在途 ${Math.round(vehicles.inTransit).toLocaleString("zh-CN")} 辆`);
     lines.push(`车流 · 本 tick 出发 ${Math.round(vehicles.departed).toLocaleString("zh-CN")} / 经过 ${Math.round(vehicles.departed + vehicles.arrived).toLocaleString("zh-CN")} / 到达 ${Math.round(vehicles.arrived).toLocaleString("zh-CN")}`);
   }

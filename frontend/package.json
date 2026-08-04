@@ -10,7 +10,6 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@deck.gl/aggregation-layers": "^9.3.7",
     "@deck.gl/core": "^9.3.7",
     "@deck.gl/layers": "^9.3.7",
     "@fontsource-variable/noto-sans-sc": "^5.3.0",
