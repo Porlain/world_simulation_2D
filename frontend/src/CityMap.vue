@@ -57,7 +57,72 @@ function tooltipText(object: TownFeature): string {
       `车流本 tick：出发 ${Math.round(road.vehicleDeparted).toLocaleString("zh-CN")} / 到达 ${Math.round(road.vehicleArrived).toLocaleString("zh-CN")}`,
     ].join("\n");
   }
+  const sourceId = (object as TownFeature & { sourceId?: string }).sourceId;
+  if (sourceId) {
+    const locationText = locationTooltipText(sourceId);
+    if (locationText) return locationText;
+  }
   return object.name;
+}
+
+function snapshotFlowValue(snapshot: SnapshotState, connectionId: string, flowId: string) {
+  if (snapshot.schema_version === 2) {
+    const value = snapshot.connections[connectionId]?.[flowId];
+    return { departed: value?.departed ?? 0, arrived: value?.arrived ?? 0, inTransit: value?.in_transit ?? 0 };
+  }
+  const activity = snapshot.connection_activity[connectionId]?.[flowId];
+  const buckets = snapshot.transit_buckets[connectionId]?.[flowId] ?? [];
+  return {
+    departed: activity?.departed ?? 0,
+    arrived: activity?.arrived ?? 0,
+    inTransit: buckets.reduce((sum, count) => sum + count, 0),
+  };
+}
+
+function locationTooltipText(locationId: string): string | null {
+  const bundle = props.bundle;
+  const snapshot = props.snapshot;
+  if (!bundle || !snapshot) return null;
+  const location = bundle.config.locations.find((item) => item.id === locationId);
+  if (!location) return null;
+  const types = bundle.simulation_package?.flow_types ?? bundle.config.flow_types;
+  const peopleId = types.find((flow) => flow.id === "pedestrian" || flow.id === "citizen" || flow.unit === "people")?.id ?? null;
+  const vehicleId = types.find((flow) => flow.id === "vehicle" || flow.unit === "vehicles")?.id ?? null;
+  const connections = bundle.simulation_package?.connections ?? bundle.config.connections;
+  const statsFor = (flowId: string | null) => {
+    if (!flowId) return null;
+    const stats = { occupants: snapshot.location_counts[locationId]?.[flowId] ?? 0, inTransit: 0, departed: 0, arrived: 0 };
+    for (const connection of connections) {
+      if (connection.from_location_id !== locationId && connection.to_location_id !== locationId) continue;
+      const activity = snapshotFlowValue(snapshot, connection.id, flowId);
+      stats.inTransit += activity.inTransit;
+      if (connection.from_location_id === locationId) stats.departed += activity.departed;
+      if (connection.to_location_id === locationId) stats.arrived += activity.arrived;
+    }
+    return stats;
+  };
+  const people = statsFor(peopleId);
+  const vehicles = statsFor(vehicleId);
+  const bindingIds = bundle.simulation_package?.bindings.location_feature_ids[locationId] ?? [];
+  const districtLabels = bundle.town_skeleton
+    ? bindingIds
+      .map((featureId) => bundle.town_skeleton?.districts.find((district) => district.id === featureId))
+      .filter((district): district is NonNullable<typeof district> => Boolean(district))
+      .map((district) => district.id.replace(/^district-/, "").toUpperCase())
+    : [];
+  const lines = [location.name];
+  if (districtLabels.length) lines.push(`聚合居民区：${districtLabels.join("、")}`);
+  if (people) {
+    lines.push(`人流 · 建筑内 ${Math.round(people.occupants).toLocaleString("zh-CN")} 人`);
+    lines.push(`人流 · 道路在途 ${Math.round(people.inTransit).toLocaleString("zh-CN")} 人`);
+    lines.push(`人流 · 本 tick 出发 ${Math.round(people.departed).toLocaleString("zh-CN")} / 经过 ${Math.round(people.departed + people.arrived).toLocaleString("zh-CN")} / 到达 ${Math.round(people.arrived).toLocaleString("zh-CN")}`);
+  }
+  if (vehicles) {
+    lines.push(`车流 · 建筑内 ${Math.round(vehicles.occupants).toLocaleString("zh-CN")} 辆`);
+    lines.push(`车流 · 道路在途 ${Math.round(vehicles.inTransit).toLocaleString("zh-CN")} 辆`);
+    lines.push(`车流 · 本 tick 出发 ${Math.round(vehicles.departed).toLocaleString("zh-CN")} / 经过 ${Math.round(vehicles.departed + vehicles.arrived).toLocaleString("zh-CN")} / 到达 ${Math.round(vehicles.arrived).toLocaleString("zh-CN")}`);
+  }
+  return lines.join("\n");
 }
 
 function fittedViewState(data: TownRenderData) {
@@ -122,6 +187,7 @@ onMounted(async () => {
         border: "1px solid rgba(63, 61, 56, 0.35)",
         borderRadius: "2px",
         fontSize: "11px",
+        maxWidth: "360px",
       },
     } : null,
     onClick: ({ object }: PickingInfo<TownFeature>) => {

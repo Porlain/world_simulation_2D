@@ -168,6 +168,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, dialog:focus-vi
 .metric-list div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .metric-list dt { color: var(--muted); font-size: 11px; }
 .metric-list dd { max-width: 64%; margin: 0; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; font-weight: 700; overflow-wrap: anywhere; text-align: right; }
+.aggregation-block { margin-top: 15px; padding-top: 12px; border-top: 1px solid var(--paper-line); }
+.aggregation-group { display: grid; gap: 6px; }
+.aggregation-label, .aggregation-note { color: var(--muted); font-size: 10px; }
+.aggregation-note { margin-top: 7px; }
+.aggregation-list { display: flex; flex-wrap: wrap; gap: 4px; max-height: 82px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.aggregation-list li { padding: 3px 5px; color: var(--ink); background: rgb(63 61 56 / 7%); border: 1px solid rgb(63 61 56 / 16%); border-radius: 2px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
 .focus-line { display: flex; align-items: center; gap: 8px; min-height: 24px; font-family: "Noto Sans SC Variable", Georgia, "Songti SC", serif; font-size: 15px; }
 .focus-marker { width: 8px; height: 8px; flex: 0 0 auto; background: var(--selection); border-radius: 50%; box-shadow: 0 0 0 4px rgb(181 106 63 / 15%); }
 

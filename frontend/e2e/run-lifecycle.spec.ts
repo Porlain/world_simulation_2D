@@ -17,7 +17,8 @@ test("runs, pauses, seeks, and ends a city simulation", async ({ page }, testInf
   await page.goto("/");
   await expect(page.locator(".city-map")).toBeVisible();
   await expect(page.locator(".menu-drawer")).toBeVisible();
-  await expect(page.locator(".map-title h1")).toContainText("示例城");
+  await expect(page.locator(".map-title h1")).toHaveText(/^Town-\d+$/, { timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "启动模拟" })).toBeEnabled({ timeout: 20_000 });
   await page.getByRole("button", { name: "启动模拟" }).click();
   await expect(page.locator(".menu-drawer")).toBeVisible();
   await expect.poll(async () => Number((await page.locator(".tick-readout").innerText()).replace(/\D/g, "")), {

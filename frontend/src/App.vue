@@ -39,6 +39,7 @@ const error = ref<ApiError | null>(null);
 const selectedFeatureId = ref<string | null>(null);
 const draft = ref<ScenarioDraft | null>(null);
 const generationLoading = ref(false);
+const DEFAULT_POPULATION = 11_499;
 const layerVisibility = ref<TownLayerVisibility>({
   walls: true,
   roads: true,
@@ -87,6 +88,61 @@ const selectedLocationStats = computed(() => {
   const vehicleId = types.find((flow) => flow.id === "vehicle" || flow.unit === "vehicles")?.id ?? null;
   return location ? { people: locationFlowStats(location.id, peopleId), vehicle: locationFlowStats(location.id, vehicleId) } : null;
 });
+
+const districtKindLabels: Record<string, string> = {
+  residential: "居住",
+  market: "市场",
+  industrial: "工业",
+  storage: "仓储",
+  religious: "宗教",
+  civic: "行政",
+  military: "军事",
+  stable: "驿站",
+};
+
+const buildingKindLabels: Record<string, string> = {
+  residential: "居民楼",
+  market: "商铺",
+  workshop: "工坊",
+  storage: "仓库",
+  religious: "神殿",
+  administrative: "行政厅",
+  military: "兵营",
+  stable: "马厩",
+};
+
+function aggregateFeatures(locationId: string): Array<{ id: string; label: string; kind: "district" | "building" | "other" }> {
+  const bundle = selectedBundle.value;
+  const featureIds = bundle?.simulation_package?.bindings.location_feature_ids[locationId] ?? [];
+  if (!bundle?.town_skeleton) return [];
+  const skeleton = bundle.town_skeleton;
+  const districts = new Map(skeleton.districts.map((district) => [district.id, district]));
+  const buildings = new Map(skeleton.buildings.map((building) => [building.id, building]));
+  return featureIds.map((featureId) => {
+    const district = districts.get(featureId);
+    if (district) {
+      return {
+        id: featureId,
+        kind: "district" as const,
+        label: `${featureId.replace(/^district-/, "").toUpperCase()} · ${districtKindLabels[district.kind] ?? district.kind}`,
+      };
+    }
+    const building = buildings.get(featureId);
+    if (building) {
+      return {
+        id: featureId,
+        kind: "building" as const,
+        label: `${buildingKindLabels[building.kind] ?? building.kind} ${featureId.replace(/^building-/, "")}`,
+      };
+    }
+    const landmark = skeleton.landmarks.find((item) => item.id === featureId);
+    return { id: featureId, kind: "other" as const, label: landmark?.name ?? featureId };
+  });
+}
+
+const selectedAggregateFeatures = computed(() => selectedLocation.value ? aggregateFeatures(selectedLocation.value.id) : []);
+const selectedAggregateDistricts = computed(() => selectedAggregateFeatures.value.filter((feature) => feature.kind === "district"));
+const selectedAggregateBuildings = computed(() => selectedAggregateFeatures.value.filter((feature) => feature.kind === "building"));
 
 const totalPeople = computed(() => displayedSnapshot.value?.totals[flowId.value ?? ""] ?? 0);
 
@@ -163,6 +219,12 @@ async function loadInitial() {
     recentRuns.value = runsResult.value.items;
   } else if (!error.value) {
     error.value = normalizeError(runsResult.reason);
+  }
+  const activeHistoryRun = recentRuns.value.find((run) => run.status === "running" || run.status === "paused");
+  if (activeHistoryRun) {
+    await selectRun(activeHistoryRun.id);
+  } else if (!error.value) {
+    await generateTown({ generationSeed: Math.floor(Math.random() * 9_007_199_254_740_991), population: DEFAULT_POPULATION });
   }
   loading.value = false;
 }
@@ -509,6 +571,18 @@ onUnmounted(() => {
               <div><dt>即将到达</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.approaching) }}</dd></div>
             </dl>
           </div>
+          <div v-if="selectedAggregateDistricts.length || selectedAggregateBuildings.length" class="aggregation-block">
+            <div class="section-kicker">聚合范围</div>
+            <div v-if="selectedAggregateDistricts.length" class="aggregation-group">
+              <span class="aggregation-label">居民区（{{ selectedAggregateDistricts.length }}）</span>
+              <ul class="aggregation-list">
+                <li v-for="feature in selectedAggregateDistricts" :key="feature.id">{{ feature.label }}</li>
+              </ul>
+            </div>
+            <div v-if="selectedAggregateBuildings.length" class="aggregation-note">
+              关联建筑 {{ formatNumber(selectedAggregateBuildings.length) }} 座
+            </div>
+          </div>
           <div class="metric-list"><div><dt>坐标</dt><dd>{{ selectedLocation.position[0] }}, {{ selectedLocation.position[1] }}</dd></div></div>
         </div>
         <dl v-else-if="selectedConnection && displayedSnapshot && flowId" class="metric-list">
@@ -574,6 +648,18 @@ onUnmounted(() => {
                     <div><dt>本 tick 到达</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.arrived) }}</dd></div>
                     <div><dt>即将到达</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.approaching) }}</dd></div>
                   </dl>
+                </div>
+                <div v-if="selectedAggregateDistricts.length || selectedAggregateBuildings.length" class="aggregation-block">
+                  <div class="section-kicker">聚合范围</div>
+                  <div v-if="selectedAggregateDistricts.length" class="aggregation-group">
+                    <span class="aggregation-label">居民区（{{ selectedAggregateDistricts.length }}）</span>
+                    <ul class="aggregation-list">
+                      <li v-for="feature in selectedAggregateDistricts" :key="feature.id">{{ feature.label }}</li>
+                    </ul>
+                  </div>
+                  <div v-if="selectedAggregateBuildings.length" class="aggregation-note">
+                    关联建筑 {{ formatNumber(selectedAggregateBuildings.length) }} 座
+                  </div>
                 </div>
                 <div class="metric-list"><div><dt>坐标</dt><dd>{{ selectedLocation.position[0] }}, {{ selectedLocation.position[1] }}</dd></div></div>
               </div>
