@@ -164,6 +164,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, dialog:focus-vi
   text-transform: uppercase;
 }
 .metric-list { display: grid; gap: 8px; margin: 13px 0 0; }
+.flow-stats-block + .flow-stats-block { margin-top: 15px; }
 .metric-list div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .metric-list dt { color: var(--muted); font-size: 11px; }
 .metric-list dd { max-width: 64%; margin: 0; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; font-weight: 700; overflow-wrap: anywhere; text-align: right; }

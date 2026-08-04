@@ -65,6 +65,10 @@ const flowId = computed(() => {
   const types = selectedBundle.value?.simulation_package?.flow_types ?? selectedBundle.value?.config.flow_types ?? [];
   return types.find((flow) => flow.id === "pedestrian" || flow.id === "citizen" || flow.unit === "people")?.id ?? types[0]?.id ?? null;
 });
+const vehicleFlowId = computed(() => {
+  const types = selectedBundle.value?.simulation_package?.flow_types ?? selectedBundle.value?.config.flow_types ?? [];
+  return types.find((flow) => flow.id === "vehicle" || flow.unit === "vehicles")?.id ?? null;
+});
 
 const selectedLocation = computed(() => {
   if (!selectedFeatureId.value || !selectedBundle.value) return null;
@@ -76,20 +80,53 @@ const selectedConnection = computed<ConnectionConfig | null>(() => {
   return selectedBundle.value.config.connections.find((connection) => connection.id === selectedFeatureId.value) ?? null;
 });
 
+const selectedLocationStats = computed(() => {
+  const location = selectedLocation.value;
+  const types = selectedBundle.value?.simulation_package?.flow_types ?? selectedBundle.value?.config.flow_types ?? [];
+  const peopleId = types.find((flow) => flow.id === "pedestrian" || flow.id === "citizen" || flow.unit === "people")?.id ?? null;
+  const vehicleId = types.find((flow) => flow.id === "vehicle" || flow.unit === "vehicles")?.id ?? null;
+  return location ? { people: locationFlowStats(location.id, peopleId), vehicle: locationFlowStats(location.id, vehicleId) } : null;
+});
+
 const totalPeople = computed(() => displayedSnapshot.value?.totals[flowId.value ?? ""] ?? 0);
 
-function connectionDeparted(connectionId: string, flowTypeId: string): number {
+function connectionActivity(connectionId: string, flowTypeId: string): { departed: number; arrived: number; inTransit: number } {
   const snapshot = displayedSnapshot.value;
-  if (!snapshot) return 0;
-  if (snapshot.schema_version === 2) return snapshot.connections[connectionId]?.[flowTypeId]?.departed ?? 0;
-  return snapshot.connection_activity[connectionId]?.[flowTypeId]?.departed ?? 0;
+  if (!snapshot) return { departed: 0, arrived: 0, inTransit: 0 };
+  if (snapshot.schema_version === 2) {
+    const value = snapshot.connections[connectionId]?.[flowTypeId];
+    return { departed: value?.departed ?? 0, arrived: value?.arrived ?? 0, inTransit: value?.in_transit ?? 0 };
+  }
+  const value = snapshot.connection_activity[connectionId]?.[flowTypeId];
+  const buckets = snapshot.transit_buckets[connectionId]?.[flowTypeId] ?? [];
+  return { departed: value?.departed ?? 0, arrived: value?.arrived ?? 0, inTransit: buckets.reduce((sum, count) => sum + count, 0) };
+}
+
+function connectionDeparted(connectionId: string, flowTypeId: string): number {
+  return connectionActivity(connectionId, flowTypeId).departed;
 }
 
 function connectionArrived(connectionId: string, flowTypeId: string): number {
+  return connectionActivity(connectionId, flowTypeId).arrived;
+}
+
+function locationFlowStats(locationId: string, flowTypeId: string | null) {
   const snapshot = displayedSnapshot.value;
-  if (!snapshot) return 0;
-  if (snapshot.schema_version === 2) return snapshot.connections[connectionId]?.[flowTypeId]?.arrived ?? 0;
-  return snapshot.connection_activity[connectionId]?.[flowTypeId]?.arrived ?? 0;
+  const bundle = selectedBundle.value;
+  if (!snapshot || !bundle || !flowTypeId) return null;
+  const connections = bundle.simulation_package?.connections ?? bundle.config.connections;
+  const stats = { occupants: snapshot.location_counts[locationId]?.[flowTypeId] ?? 0, departed: 0, arrived: 0, approaching: 0 };
+  for (const connection of connections) {
+    const activity = connectionActivity(connection.id, flowTypeId);
+    if (connection.from_location_id === locationId) {
+      stats.departed += activity.departed;
+    }
+    if (connection.to_location_id === locationId) {
+      stats.arrived += activity.arrived;
+      stats.approaching += activity.inTransit;
+    }
+  }
+  return stats;
 }
 
 function normalizeError(value: unknown): ApiError {
@@ -387,7 +424,11 @@ function featureName(featureId: string): string {
   const location = selectedBundle.value?.config.locations.find((item) => item.id === featureId);
   if (location) return location.name;
   const connection = selectedBundle.value?.config.connections.find((item) => item.id === featureId);
-  return connection ? `${connection.from_location_id} → ${connection.to_location_id}` : featureId;
+  return connection ? `${locationName(connection.from_location_id)} → ${locationName(connection.to_location_id)}` : featureId;
+}
+
+function locationName(locationId: string): string {
+  return selectedBundle.value?.config.locations.find((location) => location.id === locationId)?.name ?? locationId;
 }
 
 function formatNumber(value: number): string {
@@ -447,13 +488,38 @@ onUnmounted(() => {
             <X :size="15" aria-hidden="true" />
           </button>
         </div>
-        <dl v-if="selectedLocation && displayedSnapshot && flowId" class="metric-list">
-          <div><dt>地点存量</dt><dd>{{ formatNumber(displayedSnapshot.location_counts[selectedLocation.id]?.[flowId] ?? 0) }}</dd></div>
-          <div><dt>坐标</dt><dd>{{ selectedLocation.position[0] }}, {{ selectedLocation.position[1] }}</dd></div>
-        </dl>
+        <div v-if="selectedLocation && selectedLocationStats" class="location-inspector">
+          <div v-if="selectedLocationStats.people" class="flow-stats-block">
+            <div class="section-kicker">人流</div>
+            <dl class="metric-list">
+              <div><dt>建筑内</dt><dd>{{ formatNumber(selectedLocationStats.people.occupants) }}</dd></div>
+              <div><dt>本 tick 经过</dt><dd>{{ formatNumber(selectedLocationStats.people.departed + selectedLocationStats.people.arrived) }}</dd></div>
+              <div><dt>本 tick 出发</dt><dd>{{ formatNumber(selectedLocationStats.people.departed) }}</dd></div>
+              <div><dt>本 tick 到达</dt><dd>{{ formatNumber(selectedLocationStats.people.arrived) }}</dd></div>
+              <div><dt>即将到达</dt><dd>{{ formatNumber(selectedLocationStats.people.approaching) }}</dd></div>
+            </dl>
+          </div>
+          <div v-if="selectedLocationStats.vehicle" class="flow-stats-block">
+            <div class="section-kicker">车流</div>
+            <dl class="metric-list">
+              <div><dt>建筑内</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.occupants) }}</dd></div>
+              <div><dt>本 tick 经过</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.departed + selectedLocationStats.vehicle.arrived) }}</dd></div>
+              <div><dt>本 tick 出发</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.departed) }}</dd></div>
+              <div><dt>本 tick 到达</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.arrived) }}</dd></div>
+              <div><dt>即将到达</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.approaching) }}</dd></div>
+            </dl>
+          </div>
+          <div class="metric-list"><div><dt>坐标</dt><dd>{{ selectedLocation.position[0] }}, {{ selectedLocation.position[1] }}</dd></div></div>
+        </div>
         <dl v-else-if="selectedConnection && displayedSnapshot && flowId" class="metric-list">
+          <div><dt>路径</dt><dd>{{ locationName(selectedConnection.from_location_id) }} → {{ locationName(selectedConnection.to_location_id) }}</dd></div>
           <div><dt>刚刚出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, flowId)) }}</dd></div>
           <div><dt>刚刚到达</dt><dd>{{ formatNumber(connectionArrived(selectedConnection.id, flowId)) }}</dd></div>
+          <template v-if="vehicleFlowId">
+            <div><dt>车流在途</dt><dd>{{ formatNumber(connectionActivity(selectedConnection.id, vehicleFlowId).inTransit) }}</dd></div>
+            <div><dt>车流本 tick 出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, vehicleFlowId)) }}</dd></div>
+            <div><dt>车流本 tick 到达</dt><dd>{{ formatNumber(connectionArrived(selectedConnection.id, vehicleFlowId)) }}</dd></div>
+          </template>
           <div><dt>道路容量</dt><dd>{{ formatNumber(selectedConnection.capacity_per_tick[flowId] ?? 0) }} / 秒</dd></div>
           <div><dt>旅行时间</dt><dd>{{ selectedConnection.travel_time_ticks }} 秒</dd></div>
         </dl>
@@ -488,13 +554,38 @@ onUnmounted(() => {
             <section v-if="selectedFeatureId" class="drawer-selection">
               <div class="section-kicker">当前焦点</div>
               <div class="focus-line"><span class="focus-marker"></span><strong>{{ featureName(selectedFeatureId) }}</strong></div>
-              <dl v-if="selectedLocation && displayedSnapshot && flowId" class="metric-list">
-                <div><dt>地点存量</dt><dd>{{ formatNumber(displayedSnapshot.location_counts[selectedLocation.id]?.[flowId] ?? 0) }}</dd></div>
-                <div><dt>坐标</dt><dd>{{ selectedLocation.position[0] }}, {{ selectedLocation.position[1] }}</dd></div>
-              </dl>
+              <div v-if="selectedLocation && selectedLocationStats" class="location-inspector">
+                <div v-if="selectedLocationStats.people" class="flow-stats-block">
+                  <div class="section-kicker">人流</div>
+                  <dl class="metric-list">
+                    <div><dt>建筑内</dt><dd>{{ formatNumber(selectedLocationStats.people.occupants) }}</dd></div>
+                    <div><dt>本 tick 经过</dt><dd>{{ formatNumber(selectedLocationStats.people.departed + selectedLocationStats.people.arrived) }}</dd></div>
+                    <div><dt>本 tick 出发</dt><dd>{{ formatNumber(selectedLocationStats.people.departed) }}</dd></div>
+                    <div><dt>本 tick 到达</dt><dd>{{ formatNumber(selectedLocationStats.people.arrived) }}</dd></div>
+                    <div><dt>即将到达</dt><dd>{{ formatNumber(selectedLocationStats.people.approaching) }}</dd></div>
+                  </dl>
+                </div>
+                <div v-if="selectedLocationStats.vehicle" class="flow-stats-block">
+                  <div class="section-kicker">车流</div>
+                  <dl class="metric-list">
+                    <div><dt>建筑内</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.occupants) }}</dd></div>
+                    <div><dt>本 tick 经过</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.departed + selectedLocationStats.vehicle.arrived) }}</dd></div>
+                    <div><dt>本 tick 出发</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.departed) }}</dd></div>
+                    <div><dt>本 tick 到达</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.arrived) }}</dd></div>
+                    <div><dt>即将到达</dt><dd>{{ formatNumber(selectedLocationStats.vehicle.approaching) }}</dd></div>
+                  </dl>
+                </div>
+                <div class="metric-list"><div><dt>坐标</dt><dd>{{ selectedLocation.position[0] }}, {{ selectedLocation.position[1] }}</dd></div></div>
+              </div>
               <dl v-else-if="selectedConnection && displayedSnapshot && flowId" class="metric-list">
+                <div><dt>路径</dt><dd>{{ locationName(selectedConnection.from_location_id) }} → {{ locationName(selectedConnection.to_location_id) }}</dd></div>
                 <div><dt>刚刚出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, flowId)) }}</dd></div>
                 <div><dt>刚刚到达</dt><dd>{{ formatNumber(connectionArrived(selectedConnection.id, flowId)) }}</dd></div>
+                <template v-if="vehicleFlowId">
+                  <div><dt>车流在途</dt><dd>{{ formatNumber(connectionActivity(selectedConnection.id, vehicleFlowId).inTransit) }}</dd></div>
+                  <div><dt>车流本 tick 出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, vehicleFlowId)) }}</dd></div>
+                  <div><dt>车流本 tick 到达</dt><dd>{{ formatNumber(connectionArrived(selectedConnection.id, vehicleFlowId)) }}</dd></div>
+                </template>
                 <div><dt>道路容量</dt><dd>{{ formatNumber(selectedConnection.capacity_per_tick[flowId] ?? 0) }} / 秒</dd></div>
                 <div><dt>旅行时间</dt><dd>{{ selectedConnection.travel_time_ticks }} 秒</dd></div>
               </dl>

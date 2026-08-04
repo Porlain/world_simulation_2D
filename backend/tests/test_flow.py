@@ -28,6 +28,8 @@ def test_connections_are_bound_to_streets_and_location_endpoints() -> None:
     street_ids = {street.id for street in town.streets}
 
     assert set(package.bindings.location_feature_ids) == set(locations)
+    assert "landmark-plaza" in package.bindings.location_feature_ids["location-plaza"]
+    assert "landmark-north-gate" in package.bindings.location_feature_ids["location-gate-north"]
     assert set(package.bindings.connection_street_ids) == {connection.id for connection in package.connections}
     for connection in package.connections:
         assert set(connection.street_segment_ids) <= street_ids

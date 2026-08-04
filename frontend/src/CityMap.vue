@@ -50,6 +50,7 @@ function tooltipText(object: TownFeature): string {
     return [
       `道路 ${road.id}`,
       `关联线路：${road.routeCount.toLocaleString("zh-CN")} 条`,
+      ...(road.fromName && road.toName ? [`主要线路：${road.fromName} → ${road.toName}`] : []),
       `关联人流：${Math.round(road.peopleCount).toLocaleString("zh-CN")} 人在途`,
       `人流本 tick：出发 ${Math.round(road.peopleDeparted).toLocaleString("zh-CN")} / 到达 ${Math.round(road.peopleArrived).toLocaleString("zh-CN")}`,
       `关联车流：${Math.round(road.vehicleCount).toLocaleString("zh-CN")} 辆在途`,
@@ -84,8 +85,15 @@ function updateLayers(refit = false, rebuildStatic = false) {
   }
   const viewState = refit && renderData ? fittedViewState(renderData) : null;
   if (viewState) viewZoom.value = viewState.zoom;
+  const landmarkLayers = staticLayers.filter((layer) => layer.id === "landmark-symbols" || layer.id === "landmark-labels");
+  const baseStaticLayers = staticLayers.filter((layer) => layer.id !== "landmark-symbols" && layer.id !== "landmark-labels");
+  const dynamicLayers = props.bundle
+    ? createDynamicTownLayers(props.bundle, props.snapshot, props.selectedFeatureId, undefined, props.visibility)
+    : [];
+  const particleLayers = dynamicLayers.filter((layer) => layer.id === "people-flow-markers" || layer.id === "vehicle-flow-markers");
+  const baseDynamicLayers = dynamicLayers.filter((layer) => layer.id !== "people-flow-markers" && layer.id !== "vehicle-flow-markers");
   deck.setProps({
-    layers: props.bundle ? [...staticLayers, ...createDynamicTownLayers(props.bundle, props.snapshot, props.selectedFeatureId, undefined, props.visibility)] : [],
+    layers: [...baseStaticLayers, ...baseDynamicLayers, ...landmarkLayers, ...particleLayers],
     ...(viewState ? { initialViewState: viewState } : {}),
   });
 }

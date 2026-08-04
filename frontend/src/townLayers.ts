@@ -55,6 +55,8 @@ const allLayersVisible: TownLayerVisibility = {
 export interface TownFlowRoad extends TownFeature {
   path: Coordinate[];
   routeCount: number;
+  fromName?: string;
+  toName?: string;
   peopleRatio: number;
   vehicleRatio: number;
   peopleCount: number;
@@ -74,6 +76,8 @@ interface FlowMarker extends TownFeature {
   position: Coordinate;
   flow: "people" | "vehicle";
   sourceId: string;
+  fromName?: string;
+  toName?: string;
   polygon?: Coordinate[];
 }
 
@@ -129,6 +133,12 @@ function boundsFromBundle(bundle: ScenarioBundle): readonly [number, number, num
   const xs = points.map((point) => point[0]);
   const ys = points.map((point) => point[1]);
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+function locationByFeature(bundle: ScenarioBundle): Map<string, string> {
+  return new Map(Object.entries(bundle.simulation_package?.bindings.location_feature_ids ?? {}).flatMap(
+    ([locationId, featureIds]) => featureIds.map((featureId) => [featureId, locationId]),
+  ));
 }
 
 function wallSegments(boundary: Coordinate[], landmarks: TownLandmark[]): TownFeature[] {
@@ -197,7 +207,7 @@ function landmarkMotif(feature: TownFeature, size: number): TownFeature[] {
   const part = (id: string, polygon: Coordinate[]): TownFeature => ({
     ...feature,
     id: `${feature.id}-${id}`,
-    sourceId: feature.id,
+    sourceId: feature.sourceId ?? feature.id,
     polygon,
   });
 
@@ -282,16 +292,19 @@ export function assembleTownRenderData(bundle: ScenarioBundle): TownRenderData {
       })),
     };
   }
+  const boundLocation = locationByFeature(bundle);
   return {
     bounds: skeleton.bounds,
     districts: skeleton.districts.map((district) => ({
       id: district.id,
+      sourceId: boundLocation.get(district.id),
       name: district.kind,
       kind: district.kind,
       polygon: district.polygon,
     })),
     buildings: skeleton.buildings.map((building) => ({
       id: building.id,
+      sourceId: boundLocation.get(building.id),
       name: building.kind,
       kind: building.kind,
       polygon: building.polygon,
@@ -306,6 +319,7 @@ export function assembleTownRenderData(bundle: ScenarioBundle): TownRenderData {
     walls: wallSegments(skeleton.boundary, skeleton.landmarks),
     landmarks: skeleton.landmarks.map((landmark) => ({
       id: landmark.id,
+      sourceId: boundLocation.get(landmark.id),
       name: landmark.name,
       kind: landmark.kind,
       position: landmark.position,
@@ -438,6 +452,8 @@ type FlowConnection = {
   id: string;
   path: Coordinate[];
   streetIds: string[];
+  fromLocationId: string;
+  toLocationId: string;
   capacity: Record<string, number>;
   travelTime: Record<string, number>;
 };
@@ -448,6 +464,8 @@ function flowConnections(bundle: ScenarioBundle): FlowConnection[] {
       id: connection.id,
       path: connection.path,
       streetIds: connection.street_segment_ids,
+      fromLocationId: connection.from_location_id,
+      toLocationId: connection.to_location_id,
       capacity: connection.capacity_per_tick,
       travelTime: connection.travel_time_ticks,
     }));
@@ -456,6 +474,8 @@ function flowConnections(bundle: ScenarioBundle): FlowConnection[] {
     id: connection.id,
     path: connection.path,
     streetIds: [connection.id],
+    fromLocationId: connection.from_location_id,
+    toLocationId: connection.to_location_id,
     capacity: connection.capacity_per_tick,
     travelTime: Object.fromEntries(bundle.config.flow_types.map((flow) => [flow.id, connection.travel_time_ticks])),
   }));
@@ -550,6 +570,8 @@ function aggregatePhysicalRoads(
       if (!dominantLoads.has(streetId) || load > dominantLoads.get(streetId)!) {
         dominantLoads.set(streetId, load);
         road.sourceId = route.id;
+        road.fromName = route.fromName;
+        road.toName = route.toName;
       }
     }
   });
@@ -568,9 +590,10 @@ function markerPolygon(position: Coordinate, size: number, angle: number): Coord
   });
 }
 
-function flowLocations(bundle: ScenarioBundle): Array<{ id: string; position: Coordinate }> {
+function flowLocations(bundle: ScenarioBundle): Array<{ id: string; name: string; position: Coordinate }> {
   return (bundle.simulation_package?.locations ?? bundle.config.locations).map((location) => ({
     id: location.id,
+    name: location.name,
     position: location.position,
   }));
 }
@@ -588,6 +611,7 @@ export function assembleTownFlowData(
   const peopleMarkers: FlowMarker[] = [];
   const vehicleMarkers: FlowMarker[] = [];
   const locationEntries = flowLocations(bundle);
+  const locationNames = new Map(locationEntries.map((location) => [location.id, location.name]));
   const peopleLocationMax = Math.max(1, ...locationEntries.map((location) => people ? flowLocationCount(snapshot, location.id, people) : 0));
   const vehicleLocationMax = Math.max(1, ...locationEntries.map((location) => vehicle ? flowLocationCount(snapshot, location.id, vehicle) : 0));
 
@@ -607,6 +631,8 @@ export function assembleTownFlowData(
       kind: "flow-road",
       path: connection.path,
       routeCount: 1,
+      fromName: locationNames.get(connection.fromLocationId) ?? connection.fromLocationId,
+      toName: locationNames.get(connection.toLocationId) ?? connection.toLocationId,
       peopleRatio,
       vehicleRatio,
       peopleCount: peopleFlow.inTransit,
@@ -630,12 +656,16 @@ export function assembleTownFlowData(
         const point = pathPoint(connection.path, progress);
         target.push({
           id: `${connection.id}-${flow}-${index}`,
-          name: flow === "vehicle" ? `车流 · ${Math.round(count)} 辆在途` : `人流 · ${Math.round(count)} 人在途`,
+          name: flow === "vehicle"
+            ? `车流 · ${locationNames.get(connection.fromLocationId) ?? connection.fromLocationId} → ${locationNames.get(connection.toLocationId) ?? connection.toLocationId} · ${Math.round(count)} 辆在途`
+            : `人流 · ${locationNames.get(connection.fromLocationId) ?? connection.fromLocationId} → ${locationNames.get(connection.toLocationId) ?? connection.toLocationId} · ${Math.round(count)} 人在途`,
           kind: flow,
           position: point.position,
           path: connection.path,
           flow,
           sourceId: connection.id,
+          fromName: locationNames.get(connection.fromLocationId) ?? connection.fromLocationId,
+          toName: locationNames.get(connection.toLocationId) ?? connection.toLocationId,
           polygon: flow === "vehicle" ? markerPolygon(point.position, 3.8, point.angle) : undefined,
         });
       }

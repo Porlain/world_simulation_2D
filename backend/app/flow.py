@@ -195,7 +195,7 @@ def _candidates(town: TownSkeleton) -> list[_Candidate]:
                     position=junction.position,
                     initial_counts={},
                 ),
-                (junction.id,),
+                (junction.id, f"landmark-{direction}-gate"),
                 0,
             )
         )
@@ -212,7 +212,7 @@ def _candidates(town: TownSkeleton) -> list[_Candidate]:
                 position=plaza.position,
                 initial_counts={},
             ),
-            (plaza.id,),
+            (plaza.id, "landmark-plaza"),
             0,
         )
     )
