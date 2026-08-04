@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import heapq
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 
 from .models import (
@@ -196,7 +196,7 @@ def _candidates(town: TownSkeleton) -> list[_Candidate]:
                     initial_counts={},
                 ),
                 (junction.id, f"landmark-{direction}-gate"),
-                0,
+                1,
             )
         )
 
@@ -213,7 +213,7 @@ def _candidates(town: TownSkeleton) -> list[_Candidate]:
                 initial_counts={},
             ),
             (plaza.id, "landmark-plaza"),
-            0,
+            1,
         )
     )
 
@@ -233,13 +233,22 @@ def _candidates(town: TownSkeleton) -> list[_Candidate]:
                     initial_counts={},
                 ),
                 tuple(features),
-                0,
+                1,
             )
         )
 
     building_counts: dict[str, int] = {}
+    special_building_ids = {
+        landmark.building_id
+        for landmark in town.landmarks
+        if landmark.building_id is not None
+    }
     for building in town.buildings:
         building_counts[building.district_id] = building_counts.get(building.district_id, 0) + 1
+    buildings_by_district: dict[str, list[str]] = {}
+    for building in town.buildings:
+        if building.id not in special_building_ids:
+            buildings_by_district.setdefault(building.district_id, []).append(building.id)
     district_candidates = [
         _Candidate(
                 FlowLocation(
@@ -254,7 +263,37 @@ def _candidates(town: TownSkeleton) -> list[_Candidate]:
         )
         for district in sorted(town.districts, key=lambda item: item.id)
     ]
-    return candidates + _sample_evenly(district_candidates, MAX_FLOW_LOCATIONS - len(candidates))
+    selected_districts = _sample_evenly(district_candidates, MAX_FLOW_LOCATIONS - len(candidates))
+    if not selected_districts:
+        raise FlowCompileError("town has no resident flow locations")
+
+    grouped_features = {
+        candidate.location.id: list(candidate.feature_ids)
+        for candidate in selected_districts
+    }
+    selected_by_id = {candidate.location.id: candidate for candidate in selected_districts}
+    for district in district_candidates:
+        target = selected_by_id.get(district.location.id)
+        if target is None:
+            target = min(
+                selected_districts,
+                key=lambda candidate: (
+                    _distance(candidate.location.position, district.location.position),
+                    candidate.location.id,
+                ),
+            )
+        feature_ids = grouped_features[target.location.id]
+        district_id = district.location.id.removeprefix("location-")
+        feature_ids.append(district_id)
+        feature_ids.extend(buildings_by_district.get(district_id, []))
+
+    return candidates + [
+        replace(
+            candidate,
+            feature_ids=tuple(dict.fromkeys(grouped_features[candidate.location.id])),
+        )
+        for candidate in selected_districts
+    ]
 
 
 def _route_between(

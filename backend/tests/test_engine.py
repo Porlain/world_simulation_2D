@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.engine import allocate, initial_state, step, stable_int
+from app.engine import allocate, departure_budget, initial_state, step, stable_int
 from app.models import (
     ConnectionConfig,
     DemandRange,
@@ -84,6 +84,12 @@ def test_stable_int_is_reproducible_and_bounded() -> None:
 def test_allocate_is_order_independent() -> None:
     assert allocate({"a": 5, "b": 5, "c": 5}, 7) == {"a": 3, "b": 2, "c": 2}
     assert allocate({"c": 5, "a": 5, "b": 5}, 7) == {"c": 2, "a": 3, "b": 2}
+
+
+def test_people_keep_a_local_reserve_while_vehicles_use_available_capacity() -> None:
+    assert departure_budget(17, "citizen", 17) == 9
+    assert departure_budget(8, "pedestrian", 17) == 0
+    assert departure_budget(17, "vehicle", 17) == 17
 
 
 def test_initial_state_has_zero_transit() -> None:

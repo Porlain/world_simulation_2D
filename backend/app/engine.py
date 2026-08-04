@@ -56,6 +56,14 @@ def allocate(planned: dict[str, int], available: int) -> dict[str, int]:
     return allocated
 
 
+def departure_budget(available: int, flow_id: str, initial_count: int) -> int:
+    # Keep half of the initial people at their location while vehicles use full capacity.
+    if flow_id in {"pedestrian", "citizen"}:
+        reserve = max(1, initial_count // 2)
+        return max(0, available - reserve)
+    return available
+
+
 def initial_state(scenario: ScenarioConfig) -> SnapshotState:
     flow_ids = [flow.id for flow in scenario.flow_types]
     location_counts = {
@@ -171,7 +179,14 @@ def step(scenario: ScenarioConfig, previous: SnapshotState, seed: int) -> Snapsh
                 planned[connection.id] = min(
                     requested, connection.capacity_per_tick[flow_id]
                 )
-            actual = allocate(planned, available)
+            actual = allocate(
+                planned,
+                departure_budget(
+                    available,
+                    flow_id,
+                    location_by_id[source_id].initial_counts.get(flow_id, 0),
+                ),
+            )
             for connection in outgoing[source_id]:
                 amount = actual[connection.id]
                 state.location_counts[source_id][flow_id] -= amount
@@ -263,6 +278,7 @@ def assert_simulation_invariants(
 def step_simulation(package: SimulationPackage, previous: SimulationState, seed: int) -> SimulationState:
     flow_ids = [flow.id for flow in package.flow_types]
     connections = sorted(package.connections, key=lambda connection: connection.id)
+    location_by_id = {location.id: location for location in package.locations}
     state = SimulationState(
         tick=previous.tick + 1,
         location_counts=deepcopy(previous.location_counts),
@@ -305,7 +321,14 @@ def step_simulation(package: SimulationPackage, previous: SimulationState, seed:
                     demand.max,
                 )
                 planned[connection.id] = min(requested, connection.capacity_per_tick[flow_id])
-            actual = allocate(planned, available)
+            actual = allocate(
+                planned,
+                departure_budget(
+                    available,
+                    flow_id,
+                    location_by_id[source_id].initial_counts.get(flow_id, 0),
+                ),
+            )
             for connection in outgoing[source_id]:
                 amount = actual[connection.id]
                 state.location_counts[source_id][flow_id] -= amount
