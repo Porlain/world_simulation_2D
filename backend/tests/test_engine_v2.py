@@ -64,3 +64,10 @@ def test_v2_engine_is_deterministic_and_conserves_population() -> None:
             == values[flow_id].in_transit
             for values in snapshot.streets.values()
         )
+        assert all(
+            len(values[flow_id].street_in_transit)
+            == len(connection.street_segment_ids)
+            and sum(values[flow_id].street_in_transit) == values[flow_id].in_transit
+            for connection in package.connections
+            for values in (snapshot.connections[connection.id],)
+        )

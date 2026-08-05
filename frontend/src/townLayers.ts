@@ -448,6 +448,7 @@ type FlowConnection = {
   id: string;
   path: Coordinate[];
   streetIds: string[];
+  streetDirections: Array<"forward" | "reverse">;
   fromLocationId: string;
   toLocationId: string;
   capacity: Record<string, number>;
@@ -460,6 +461,7 @@ function flowConnections(bundle: ScenarioBundle): FlowConnection[] {
       id: connection.id,
       path: connection.path,
       streetIds: connection.street_segment_ids,
+      streetDirections: connection.street_directions ?? [],
       fromLocationId: connection.from_location_id,
       toLocationId: connection.to_location_id,
       capacity: connection.capacity_per_tick,
@@ -470,6 +472,7 @@ function flowConnections(bundle: ScenarioBundle): FlowConnection[] {
     id: connection.id,
     path: connection.path,
     streetIds: [connection.id],
+    streetDirections: [],
     fromLocationId: connection.from_location_id,
     toLocationId: connection.to_location_id,
     capacity: connection.capacity_per_tick,
@@ -505,14 +508,45 @@ function pathPoint(path: Coordinate[], progress: number): { position: Coordinate
   return { position: path[path.length - 1], angle: 0 };
 }
 
-function snapshotFlow(snapshot: SnapshotState, connectionId: string, flowId: string): { inTransit: number; departed: number; arrived: number } {
+function routeStreetPaths(
+  streetsById: Map<string, { path: Coordinate[] }>,
+  connection: FlowConnection,
+): Coordinate[][] {
+  if (!streetsById.size || !connection.streetIds.length || !connection.streetDirections.length) {
+    return [connection.path];
+  }
+  return connection.streetIds.map((streetId, index) => {
+    const street = streetsById.get(streetId);
+    if (!street) return connection.path;
+    return connection.streetDirections[index] === "reverse"
+      ? [...street.path].reverse()
+      : street.path;
+  });
+}
+
+function snapshotFlow(snapshot: SnapshotState, connectionId: string, flowId: string): {
+  inTransit: number;
+  departed: number;
+  arrived: number;
+  streetInTransit: number[];
+} {
   if (snapshot.schema_version === 2) {
     const value = (snapshot as FlowSnapshot).connections[connectionId]?.[flowId];
-    return { inTransit: value?.in_transit ?? 0, departed: value?.departed ?? 0, arrived: value?.arrived ?? 0 };
+    return {
+      inTransit: value?.in_transit ?? 0,
+      departed: value?.departed ?? 0,
+      arrived: value?.arrived ?? 0,
+      streetInTransit: value?.street_in_transit ?? [],
+    };
   }
   const value = (snapshot as LegacySnapshotState).connection_activity[connectionId]?.[flowId];
   const buckets = (snapshot as LegacySnapshotState).transit_buckets[connectionId]?.[flowId] ?? [];
-  return { inTransit: buckets.reduce((sum, count) => sum + count, 0), departed: value?.departed ?? 0, arrived: value?.arrived ?? 0 };
+  return {
+    inTransit: buckets.reduce((sum, count) => sum + count, 0),
+    departed: value?.departed ?? 0,
+    arrived: value?.arrived ?? 0,
+    streetInTransit: [],
+  };
 }
 
 function flowRatio(flow: { inTransit: number; departed: number; arrived: number }, capacity: number, travelTime: number): number {
@@ -620,10 +654,17 @@ export function assembleTownFlowData(
   const vehicleMarkers: FlowMarker[] = [];
   const locationEntries = flowLocations(bundle);
   const locationNames = new Map(locationEntries.map((location) => [location.id, location.name]));
+  const streetsById = new Map(
+    (bundle.town_skeleton?.streets ?? []).map((street) => [street.id, street]),
+  );
 
   for (const connection of connections) {
-    const peopleFlow = people ? snapshotFlow(snapshot, connection.id, people) : { inTransit: 0, departed: 0, arrived: 0 };
-    const vehicleFlow = vehicle ? snapshotFlow(snapshot, connection.id, vehicle) : { inTransit: 0, departed: 0, arrived: 0 };
+    const peopleFlow = people
+      ? snapshotFlow(snapshot, connection.id, people)
+      : { inTransit: 0, departed: 0, arrived: 0, streetInTransit: [] };
+    const vehicleFlow = vehicle
+      ? snapshotFlow(snapshot, connection.id, vehicle)
+      : { inTransit: 0, departed: 0, arrived: 0, streetInTransit: [] };
     const peopleRatio = flowRatio(peopleFlow, connection.capacity[people ?? ""] ?? 0, connection.travelTime[people ?? ""] ?? 1);
     const vehicleRatio = flowRatio(vehicleFlow, connection.capacity[vehicle ?? ""] ?? 0, connection.travelTime[vehicle ?? ""] ?? 1);
     roads.push({
@@ -647,44 +688,63 @@ export function assembleTownFlowData(
       vehicleForward: 0,
       vehicleReverse: 0,
     });
-  }
-  const physicalRoads = aggregatePhysicalRoads(bundle, roads, connections, snapshot, people, vehicle);
-  const addStreetMarkers = (
-    road: TownFlowRoad,
-    flow: "people" | "vehicle",
-    direction: "forward" | "reverse",
-    count: number,
-    target: FlowMarker[],
-  ) => {
-    const markerCount = Math.min(flow === "vehicle" ? 3 : 6, Math.max(0, Math.ceil(count / (flow === "vehicle" ? 2 : 18))));
-    const path = direction === "forward" ? road.path : [...road.path].reverse();
-    for (let index = 0; index < markerCount; index += 1) {
-      const progress = (tickProgress / (flow === "vehicle" ? 8 : 18) + index / markerCount) % 1;
-      const point = pathPoint(path, progress);
-      target.push({
-        id: `${road.id}-${flow}-${direction}-${index}`,
-        name: `${flow === "vehicle" ? "车流" : "人流"} · 道路 ${road.id}\n${direction === "forward" ? "正向" : "反向"}在途 ${Math.round(count).toLocaleString("zh-CN")}`,
-        kind: flow,
-        position: point.position,
-        path,
-        flow,
-        sourceId: road.id,
-        polygon: flow === "vehicle" ? markerPolygon(point.position, 3.8, point.angle) : undefined,
-      });
-    }
-  };
-  for (const road of physicalRoads) {
+    const addRouteMarkers = (
+      flow: "people" | "vehicle",
+      count: number,
+      streetCounts: number[],
+      travelTime: number,
+      target: FlowMarker[],
+    ) => {
+      const fromName = locationNames.get(connection.fromLocationId) ?? connection.fromLocationId;
+      const toName = locationNames.get(connection.toLocationId) ?? connection.toLocationId;
+      const exactStreetCounts = streetCounts.length === connection.streetIds.length;
+      const paths = exactStreetCounts ? routeStreetPaths(streetsById, connection) : [connection.path];
+      const counts = exactStreetCounts ? streetCounts : [count];
+      for (const [streetIndex, streetCount] of counts.entries()) {
+        if (streetCount <= 0 || target.length >= (flow === "vehicle" ? 600 : 1_200)) continue;
+        const markerCount = Math.min(
+          flow === "vehicle" ? 1 : 2,
+          Math.max(1, Math.ceil(streetCount / (flow === "vehicle" ? 2 : 18))),
+        );
+        const path = paths[streetIndex] ?? connection.path;
+        for (let index = 0; index < markerCount; index += 1) {
+          const progress = (tickProgress / Math.max(1, travelTime) + index / markerCount) % 1;
+          const point = pathPoint(path, progress);
+          target.push({
+            id: `${connection.id}-${flow}-${streetIndex}-${index}`,
+            name: `${flow === "vehicle" ? "车流" : "人流"}\n出发点：${fromName}\n终点：${toName}\n当前街段在途：${Math.round(streetCount).toLocaleString("zh-CN")}\n当前路线在途：${Math.round(count).toLocaleString("zh-CN")}`,
+            kind: flow,
+            position: point.position,
+            path,
+            flow,
+            sourceId: connection.id,
+            fromName,
+            toName,
+            polygon: flow === "vehicle" ? markerPolygon(point.position, 3.8, point.angle) : undefined,
+          });
+        }
+      }
+    };
     if (people) {
-      const hasDirections = road.peopleForward + road.peopleReverse > 0;
-      addStreetMarkers(road, "people", "forward", hasDirections ? road.peopleForward : road.peopleCount, peopleMarkers);
-      if (road.peopleReverse) addStreetMarkers(road, "people", "reverse", road.peopleReverse, peopleMarkers);
+      addRouteMarkers(
+        "people",
+        peopleFlow.inTransit,
+        peopleFlow.streetInTransit,
+        connection.travelTime[people] ?? 1,
+        peopleMarkers,
+      );
     }
     if (vehicle) {
-      const hasDirections = road.vehicleForward + road.vehicleReverse > 0;
-      addStreetMarkers(road, "vehicle", "forward", hasDirections ? road.vehicleForward : road.vehicleCount, vehicleMarkers);
-      if (road.vehicleReverse) addStreetMarkers(road, "vehicle", "reverse", road.vehicleReverse, vehicleMarkers);
+      addRouteMarkers(
+        "vehicle",
+        vehicleFlow.inTransit,
+        vehicleFlow.streetInTransit,
+        connection.travelTime[vehicle] ?? 1,
+        vehicleMarkers,
+      );
     }
   }
+  const physicalRoads = aggregatePhysicalRoads(bundle, roads, connections, snapshot, people, vehicle);
   return { roads: physicalRoads, peopleMarkers, vehicleMarkers };
 }
 

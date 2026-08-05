@@ -595,9 +595,11 @@ onUnmounted(() => {
           <div class="metric-list"><div><dt>坐标</dt><dd>{{ selectedLocation.position[0] }}, {{ selectedLocation.position[1] }}</dd></div></div>
         </div>
         <dl v-else-if="selectedConnection && displayedSnapshot && flowId" class="metric-list">
-          <div><dt>路径</dt><dd>{{ locationName(selectedConnection.from_location_id) }} → {{ locationName(selectedConnection.to_location_id) }}</dd></div>
-          <div><dt>刚刚出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, flowId)) }}</dd></div>
-          <div><dt>刚刚到达</dt><dd>{{ formatNumber(connectionArrived(selectedConnection.id, flowId)) }}</dd></div>
+          <div><dt>出发点</dt><dd>{{ locationName(selectedConnection.from_location_id) }}</dd></div>
+          <div><dt>终点</dt><dd>{{ locationName(selectedConnection.to_location_id) }}</dd></div>
+          <div><dt>人流在途</dt><dd>{{ formatNumber(connectionActivity(selectedConnection.id, flowId).inTransit) }}</dd></div>
+          <div><dt>人流本 tick 出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, flowId)) }}</dd></div>
+          <div><dt>人流本 tick 到达</dt><dd>{{ formatNumber(connectionArrived(selectedConnection.id, flowId)) }}</dd></div>
           <template v-if="vehicleFlowId">
             <div><dt>车流在途</dt><dd>{{ formatNumber(connectionActivity(selectedConnection.id, vehicleFlowId).inTransit) }}</dd></div>
             <div><dt>车流本 tick 出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, vehicleFlowId)) }}</dd></div>
@@ -675,9 +677,11 @@ onUnmounted(() => {
                 <div class="metric-list"><div><dt>坐标</dt><dd>{{ selectedLocation.position[0] }}, {{ selectedLocation.position[1] }}</dd></div></div>
               </div>
               <dl v-else-if="selectedConnection && displayedSnapshot && flowId" class="metric-list">
-                <div><dt>路径</dt><dd>{{ locationName(selectedConnection.from_location_id) }} → {{ locationName(selectedConnection.to_location_id) }}</dd></div>
-                <div><dt>刚刚出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, flowId)) }}</dd></div>
-                <div><dt>刚刚到达</dt><dd>{{ formatNumber(connectionArrived(selectedConnection.id, flowId)) }}</dd></div>
+                <div><dt>出发点</dt><dd>{{ locationName(selectedConnection.from_location_id) }}</dd></div>
+                <div><dt>终点</dt><dd>{{ locationName(selectedConnection.to_location_id) }}</dd></div>
+                <div><dt>人流在途</dt><dd>{{ formatNumber(connectionActivity(selectedConnection.id, flowId).inTransit) }}</dd></div>
+                <div><dt>人流本 tick 出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, flowId)) }}</dd></div>
+                <div><dt>人流本 tick 到达</dt><dd>{{ formatNumber(connectionArrived(selectedConnection.id, flowId)) }}</dd></div>
                 <template v-if="vehicleFlowId">
                   <div><dt>车流在途</dt><dd>{{ formatNumber(connectionActivity(selectedConnection.id, vehicleFlowId).inTransit) }}</dd></div>
                   <div><dt>车流本 tick 出发</dt><dd>{{ formatNumber(connectionDeparted(selectedConnection.id, vehicleFlowId)) }}</dd></div>

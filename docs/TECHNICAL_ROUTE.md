@@ -183,8 +183,8 @@ SimulationState
   },
   "connections": {
     "market-north-gate": {
-      "pedestrian": {"departed": 12, "arrived": 8, "in_transit": 42},
-      "vehicle": {"departed": 2, "arrived": 1, "in_transit": 7}
+      "pedestrian": {"departed": 12, "arrived": 8, "in_transit": 42, "street_in_transit": [11, 18, 13]},
+      "vehicle": {"departed": 2, "arrived": 1, "in_transit": 7, "street_in_transit": [2, 3, 2]}
     }
   },
   "streets": {
@@ -198,7 +198,9 @@ SimulationState
 
 新快照不保存 `transit_buckets`。历史 v1 JSON 由后端读取适配器求和为 `in_transit`，API 始终向 Vue 返回 v2。旧场景的地点和连接由 `LegacyRenderAdapter` 转成最小 deck.gl 地标与道路，因此旧回放仍可读，但不会伪造原数据中不存在的建筑。
 
-引擎按 route queue 的剩余 tick 和每段道路长度，将每批在途流量投影到唯一 `street_graph` 边；同一批人不会再被重复计入路线经过的所有街道。街道快照直接给出 `in_transit`、本 tick `entered/exited` 以及正反方向在途量。热度带按物理街道的绝对 `in_transit` 在同一 snapshot 内归一化，因此同一 tick 内人数更多的街道颜色一定更强。
+引擎按 route queue 的剩余 tick 和每段道路长度，将每批在途流量投影到唯一 `street_graph` 边；同一批人不会再被重复计入路线经过的所有街道。连接快照的 `street_in_transit[]` 与路线的 `street_segment_ids[]` 按下标一一对应，使可点击粒子同时保留起点、终点和当前街段。街道快照直接给出 `in_transit`、本 tick `entered/exited` 以及正反方向在途量。热度带按物理街道的绝对 `in_transit` 在同一 snapshot 内归一化，因此同一 tick 内人数更多的街道颜色一定更强。
+
+人流和车流分别计算 `heat_ratio = street.in_transit / max(all streets.in_transit)`；两种图层同时开启时颜色叠加。道路悬停提示显示各自的原始在途数和相对热度百分比，避免只凭混合颜色判断。
 
 每个 flow type 都检查：
 

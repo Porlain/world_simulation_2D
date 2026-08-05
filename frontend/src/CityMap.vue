@@ -52,10 +52,12 @@ function tooltipText(object: TownFeature): string {
       `关联线路：${road.routeCount.toLocaleString("zh-CN")} 条`,
       ...(road.fromName && road.toName ? [`主要线路：${road.fromName} → ${road.toName}`] : []),
       `关联人流：${Math.round(road.peopleCount).toLocaleString("zh-CN")} 人在途`,
-      `人流方向：正向 ${Math.round(road.peopleForward).toLocaleString("zh-CN")} / 反向 ${Math.round(road.peopleReverse).toLocaleString("zh-CN")}`,
+      `人流热度：${Math.round(road.peopleRatio * 100)}%（相对本 tick 最高街道）`,
+      `人流方向：顺道路定义 ${Math.round(road.peopleForward).toLocaleString("zh-CN")} / 逆道路定义 ${Math.round(road.peopleReverse).toLocaleString("zh-CN")}`,
       `人流本 tick：进入 ${Math.round(road.peopleEntered).toLocaleString("zh-CN")} / 离开 ${Math.round(road.peopleExited).toLocaleString("zh-CN")}`,
       `关联车流：${Math.round(road.vehicleCount).toLocaleString("zh-CN")} 辆在途`,
-      `车流方向：正向 ${Math.round(road.vehicleForward).toLocaleString("zh-CN")} / 反向 ${Math.round(road.vehicleReverse).toLocaleString("zh-CN")}`,
+      `车流热度：${Math.round(road.vehicleRatio * 100)}%（相对本 tick 最高街道）`,
+      `车流方向：顺道路定义 ${Math.round(road.vehicleForward).toLocaleString("zh-CN")} / 逆道路定义 ${Math.round(road.vehicleReverse).toLocaleString("zh-CN")}`,
       `车流本 tick：进入 ${Math.round(road.vehicleEntered).toLocaleString("zh-CN")} / 离开 ${Math.round(road.vehicleExited).toLocaleString("zh-CN")}`,
     ].join("\n");
   }
@@ -237,7 +239,7 @@ watch(() => props.visibility, () => updateLayers(false, true), { deep: true });
       <span v-if="visibility.landmarks"><i class="legend-landmark"></i>地标</span>
       <span v-if="visibility.people"><i class="legend-dot legend-dot--people"></i>人流</span>
       <span v-if="visibility.vehicles"><i class="legend-diamond legend-diamond--vehicle"></i>车流</span>
-      <span v-if="visibility.heat"><i class="legend-heat"></i>热力</span>
+      <span v-if="visibility.heat" title="人流、车流分别按当前 tick 的街道在途量归一化；同时显示时两层颜色叠加"><i class="legend-heat"></i>热力</span>
     </div>
     <div class="map-scale" aria-label="地图比例尺">
       <span class="map-scale__line" :style="{ width: `${scaleWidth}px` }"></span>

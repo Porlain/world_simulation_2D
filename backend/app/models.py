@@ -262,6 +262,7 @@ class ConnectionSnapshot(StrictModel):
     departed: NonNegativeInt
     arrived: NonNegativeInt
     in_transit: NonNegativeInt
+    street_in_transit: list[NonNegativeInt] = Field(default_factory=list)
 
 
 class StreetSnapshot(StrictModel):

@@ -168,6 +168,7 @@ export interface ConnectionSnapshot {
   departed: number;
   arrived: number;
   in_transit: number;
+  street_in_transit?: number[];
 }
 
 export interface StreetSnapshot {

@@ -349,7 +349,7 @@ def _street_bucket_map(
     connection: FlowConnection,
     flow_id: str,
     lengths: dict[str, float],
-) -> list[tuple[str, str]]:
+) -> list[tuple[int, str, str]]:
     if package.street_graph is None or not connection.street_directions:
         return []
     route_lengths = [lengths[street_id] for street_id in connection.street_segment_ids]
@@ -359,7 +359,7 @@ def _street_bucket_map(
         total += length
         cumulative.append(total)
     ticks = connection.travel_time_ticks[flow_id]
-    result: list[tuple[str, str]] = []
+    result: list[tuple[int, str, str]] = []
     for index in range(ticks):
         route_index = min(
             len(cumulative) - 1,
@@ -367,6 +367,7 @@ def _street_bucket_map(
         )
         result.append(
             (
+                route_index,
                 connection.street_segment_ids[route_index],
                 connection.street_directions[route_index],
             )
@@ -376,9 +377,12 @@ def _street_bucket_map(
 
 def _street_snapshots(
     state: SimulationState, package: SimulationPackage
-) -> dict[str, dict[str, StreetSnapshot]]:
+) -> tuple[
+    dict[str, dict[str, StreetSnapshot]],
+    dict[str, dict[str, list[int]]],
+]:
     if package.street_graph is None:
-        return {}
+        return {}, {}
     flow_ids = [flow.id for flow in package.flow_types]
     lengths = {
         edge.id: sum(
@@ -400,6 +404,13 @@ def _street_snapshots(
         }
         for edge in package.street_graph.edges
     }
+    route_values = {
+        connection.id: {
+            flow_id: [0] * len(connection.street_segment_ids)
+            for flow_id in flow_ids
+        }
+        for connection in package.connections
+    }
     for connection in package.connections:
         for flow_id in flow_ids:
             bucket_edges = _street_bucket_map(package, connection, flow_id, lengths)
@@ -409,10 +420,11 @@ def _street_snapshots(
             for index, amount in enumerate(queue):
                 if amount <= 0:
                     continue
-                street_id, direction = bucket_edges[index]
+                route_index, street_id, direction = bucket_edges[index]
                 street = values[street_id][flow_id]
                 street["in_transit"] += amount
                 street[f"{direction}_in_transit"] += amount
+                route_values[connection.id][flow_id][route_index] += amount
                 previous_edge = (
                     bucket_edges[index + 1]
                     if index + 1 < len(bucket_edges)
@@ -421,27 +433,34 @@ def _street_snapshots(
                 if previous_edge != bucket_edges[index]:
                     street["entered"] += amount
                     if previous_edge is not None:
-                        values[previous_edge[0]][flow_id]["exited"] += amount
+                        values[previous_edge[1]][flow_id]["exited"] += amount
             arrived = state.connection_activity[connection.id][flow_id].arrived
             if arrived:
-                values[bucket_edges[0][0]][flow_id]["exited"] += arrived
-    return {
-        street_id: {
-            flow_id: StreetSnapshot.model_validate(flow_values)
-            for flow_id, flow_values in street_values.items()
-        }
-        for street_id, street_values in values.items()
-    }
+                values[bucket_edges[0][1]][flow_id]["exited"] += arrived
+    return (
+        {
+            street_id: {
+                flow_id: StreetSnapshot.model_validate(flow_values)
+                for flow_id, flow_values in street_values.items()
+            }
+            for street_id, street_values in values.items()
+        },
+        route_values,
+    )
 
 
 def project_flow_snapshot(state: SimulationState, package: SimulationPackage) -> FlowSnapshot:
     flow_ids = [flow.id for flow in package.flow_types]
+    streets, route_street_counts = _street_snapshots(state, package)
     connections = {
         connection.id: {
             flow_id: ConnectionSnapshot(
                 departed=state.connection_activity[connection.id][flow_id].departed,
                 arrived=state.connection_activity[connection.id][flow_id].arrived,
                 in_transit=sum(state.transit_queues[connection.id][flow_id]),
+                street_in_transit=route_street_counts.get(connection.id, {}).get(
+                    flow_id, []
+                ),
             )
             for flow_id in flow_ids
         }
@@ -451,7 +470,7 @@ def project_flow_snapshot(state: SimulationState, package: SimulationPackage) ->
         tick=state.tick,
         location_counts=state.location_counts,
         connections=connections,
-        streets=_street_snapshots(state, package),
+        streets=streets,
         totals=state.totals,
     )
     for flow_id in flow_ids:
@@ -467,4 +486,12 @@ def project_flow_snapshot(state: SimulationState, package: SimulationPackage) ->
             )
             if street_transit != in_transit:
                 raise SimulationInvariantError(f"street totals mismatch for {flow_id}")
+            if any(
+                sum(values[flow_id].street_in_transit)
+                != values[flow_id].in_transit
+                for values in snapshot.connections.values()
+            ):
+                raise SimulationInvariantError(
+                    f"connection street totals mismatch for {flow_id}"
+                )
     return snapshot

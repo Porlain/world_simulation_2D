@@ -557,7 +557,7 @@ coordinateSystem = CARTESIAN
 11 selection           PolygonLayer / PathLayer
 ```
 
-道路热度不使用 KDE 热斑。引擎依据 route queue 的剩余 tick、物理边长度和 `street_directions`，把每批在途流量投影到唯一 StreetGraph 边，并在公开快照中输出每条街的 `in_transit`、`entered/exited` 和正反方向存量。前端直接按同一 snapshot 内的绝对 `in_transit` 归一化颜色和宽度，不再把整条路线的人数重复加到每一段街道。
+道路热度不使用 KDE 热斑。引擎依据 route queue 的剩余 tick、物理边长度和 `street_directions`，把每批在途流量投影到唯一 StreetGraph 边，并在公开快照中输出每条街的 `in_transit`、`entered/exited` 和正反方向存量。每条连接同时输出与 `street_segment_ids` 对齐的 `street_in_transit[]`，供可点击粒子保留 OD 起终点并落在确切街段。前端直接按同一 snapshot 内的绝对 `in_transit` 归一化颜色和宽度，不再把整条路线的人数重复加到每一段街道。
 
 ### 10.3 更新频率
 
