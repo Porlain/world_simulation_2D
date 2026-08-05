@@ -137,12 +137,17 @@ export interface SimulationPackage {
   locations: Array<LocationConfig & { kind: "gate" | "plaza" | "landmark" | "district" }>;
   connections: Array<Omit<ConnectionConfig, "travel_time_ticks"> & {
     street_segment_ids: string[];
+    street_directions?: Array<"forward" | "reverse">;
     travel_time_ticks: Record<string, number>;
   }>;
   bindings: {
     location_feature_ids: Record<string, string[]>;
     connection_street_ids: Record<string, string[]>;
   };
+  street_graph?: {
+    junctions: TownJunction[];
+    edges: TownStreet[];
+  } | null;
 }
 
 export interface ConnectionActivity {
@@ -165,11 +170,20 @@ export interface ConnectionSnapshot {
   in_transit: number;
 }
 
+export interface StreetSnapshot {
+  entered: number;
+  exited: number;
+  in_transit: number;
+  forward_in_transit: number;
+  reverse_in_transit: number;
+}
+
 export interface FlowSnapshot {
   schema_version: 2;
   tick: number;
   location_counts: Record<string, Record<string, number>>;
   connections: Record<string, Record<string, ConnectionSnapshot>>;
+  streets?: Record<string, Record<string, StreetSnapshot>>;
   totals: Record<string, number>;
 }
 

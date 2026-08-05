@@ -100,8 +100,11 @@ TownSkeleton
 ```text
 SimulationPackage
 ├── flow_types
-├── sparse locations
-├── sparse directed connections
+├── locations: 出行起终点
+├── connections: 固定起终点的出行路线
+├── street_graph
+│   ├── junctions: TownJunction 一对一节点
+│   └── edges: TownStreet 一对一边
 └── bindings: flow IDs -> geometry IDs
 
 RenderPackage
@@ -111,7 +114,7 @@ RenderPackage
 └── bounds
 ```
 
-数千条 street segments 只属于几何/拓扑层；流量引擎只保留城门、广场、区中心和地标形成的稀疏 FlowGraph。连接通过 `street_segment_ids` 与具体街道绑定。RenderPackage 是浏览器从 stored skeleton 派生的读模型，不写入 run bundle，因此渲染准备不会阻塞引擎激活。
+`street_graph` 是可运行拓扑，不是渲染副本：随机生成的每个 `TownJunction` 都进入节点表，每个 `TownStreet` 都且只进入一条物理边。`connections` 只描述固定起终点的出行计划，并用有序 `street_segment_ids + street_directions` 引用这些边。RenderPackage 仍是浏览器派生的读模型，不写入 run bundle，因此渲染准备不会阻塞引擎激活。
 
 ### 3.4 草稿与 run
 
@@ -184,18 +187,24 @@ SimulationState
       "vehicle": {"departed": 2, "arrived": 1, "in_transit": 7}
     }
   },
+  "streets": {
+    "street-radial-r00-s00": {
+      "pedestrian": {"entered": 4, "exited": 2, "in_transit": 18, "forward_in_transit": 11, "reverse_in_transit": 7}
+    }
+  },
   "totals": {"pedestrian": 11499, "vehicle": 120}
 }
 ```
 
 新快照不保存 `transit_buckets`。历史 v1 JSON 由后端读取适配器求和为 `in_transit`，API 始终向 Vue 返回 v2。旧场景的地点和连接由 `LegacyRenderAdapter` 转成最小 deck.gl 地标与道路，因此旧回放仍可读，但不会伪造原数据中不存在的建筑。
 
-道路统计同时读取连接快照的 `in_transit`、`departed` 和 `arrived`：前者是当前道路存量，后两者是当前 tick 的出发/到达事件，不是累计值。生成场景通过 `street_segment_ids` 将共享同一物理街段的 FlowConnection 聚合到 TownStreet。热度带按当前物理街道的绝对 `in_transit` 在同一 snapshot 内归一化，因此同一 tick 内人数更多的街道颜色一定更强；`departed` 和 `arrived` 单独保留在悬停提示中。由于 v2 快照仍是连接级队列，街段值表示关联线路负载；精确到人员在某一段道路上的位置仍需要街段级队列。
+引擎按 route queue 的剩余 tick 和每段道路长度，将每批在途流量投影到唯一 `street_graph` 边；同一批人不会再被重复计入路线经过的所有街道。街道快照直接给出 `in_transit`、本 tick `entered/exited` 以及正反方向在途量。热度带按物理街道的绝对 `in_transit` 在同一 snapshot 内归一化，因此同一 tick 内人数更多的街道颜色一定更强。
 
 每个 flow type 都检查：
 
 ```text
 sum(location counts) + sum(connection in_transit) == total
+sum(street in_transit) == sum(connection in_transit)
 ```
 
 ### 5.3 提交屏障
@@ -233,7 +242,7 @@ Vue 使用 standalone `Deck` 和一个 `OrthographicView`，所有图层使用�
 - 静态 geometry 数组在 tick 间保持同一引用。
 - 热度带使用物理街道绝对在途量归一化，不使用会把相邻道路密度混在一起的 KDE 热斑。
 - 道路热度复用 street path，不把车流扩散到建筑上。
-- 动态 marker 最多约 1,000 个；每条 connection/type 按流量上限抽样 slot，并在前端按固定公式裁剪。
+- 动态 marker 按物理街道和方向抽样；每条街人流最多 6 个、车流最多 3 个 slot。
 - marker 位置通过 path 累计弧长插值，和道路处于同一个 Deck 世界坐标。
 - 首版不写 custom WebGL layer；只有 profile 证明 buffer 上传超预算后升级。
 - WebGL 初始化失败时控制、统计和后端运行仍可用。

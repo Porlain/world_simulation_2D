@@ -52,9 +52,11 @@ function tooltipText(object: TownFeature): string {
       `关联线路：${road.routeCount.toLocaleString("zh-CN")} 条`,
       ...(road.fromName && road.toName ? [`主要线路：${road.fromName} → ${road.toName}`] : []),
       `关联人流：${Math.round(road.peopleCount).toLocaleString("zh-CN")} 人在途`,
-      `人流本 tick：出发 ${Math.round(road.peopleDeparted).toLocaleString("zh-CN")} / 到达 ${Math.round(road.peopleArrived).toLocaleString("zh-CN")}`,
+      `人流方向：正向 ${Math.round(road.peopleForward).toLocaleString("zh-CN")} / 反向 ${Math.round(road.peopleReverse).toLocaleString("zh-CN")}`,
+      `人流本 tick：进入 ${Math.round(road.peopleEntered).toLocaleString("zh-CN")} / 离开 ${Math.round(road.peopleExited).toLocaleString("zh-CN")}`,
       `关联车流：${Math.round(road.vehicleCount).toLocaleString("zh-CN")} 辆在途`,
-      `车流本 tick：出发 ${Math.round(road.vehicleDeparted).toLocaleString("zh-CN")} / 到达 ${Math.round(road.vehicleArrived).toLocaleString("zh-CN")}`,
+      `车流方向：正向 ${Math.round(road.vehicleForward).toLocaleString("zh-CN")} / 反向 ${Math.round(road.vehicleReverse).toLocaleString("zh-CN")}`,
+      `车流本 tick：进入 ${Math.round(road.vehicleEntered).toLocaleString("zh-CN")} / 离开 ${Math.round(road.vehicleExited).toLocaleString("zh-CN")}`,
     ].join("\n");
   }
   const sourceId = (object as TownFeature & { sourceId?: string }).sourceId;

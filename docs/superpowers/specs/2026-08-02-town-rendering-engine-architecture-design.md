@@ -197,6 +197,7 @@ SimulationPackage
   locations: FlowLocation[]
   connections: FlowConnection[]
   bindings: FlowBindings
+  street_graph: StreetGraph
 
 FlowLocation
   id, name, kind, position, initial_counts
@@ -204,6 +205,7 @@ FlowLocation
 FlowConnection
   id, from_location_id, to_location_id
   street_segment_ids[]
+  street_directions[]
   path[]
   travel_time_ticks: flow_type -> integer
   capacity_per_tick
@@ -212,9 +214,13 @@ FlowConnection
 FlowBindings
   location_feature_ids: location_id -> [building/landmark ids]
   connection_street_ids: connection_id -> [street segment ids]
+
+StreetGraph
+  junctions: TownJunction[]
+  edges: TownStreet[]
 ```
 
-`StreetGraph` 可以包含数千段；`radial-v1` 为每个生成街区建立一个 FlowLocation，并为城门、广场和唯一功能地标保留独立地点。`FlowCompiler` 使用标准库 `heapq` 在 StreetGraph 上生成稳定最短路，邻接边按 ID 排序解决等长路径的不确定性。
+`StreetGraph` 是引擎输入而不只是绘图数据：每个生成的 `TownJunction` 一对一成为节点，每个 `TownStreet` 一对一成为边。`radial-v1` 同时为每个生成街区建立一个出行起终点 FlowLocation，并为城门、广场和唯一功能地标保留独立地点。`FlowCompiler` 使用标准库 `heapq` 在 StreetGraph 上生成稳定最短路，邻接边按 ID 排序解决等长路径的不确定性。
 
 连边步骤固定为：
 
@@ -315,7 +321,7 @@ stable_float(seed, namespace, ordinal)
 6. 相邻环和相邻扇区之间形成四边形街区；以双线性插值向内收缩得到建筑地块。
 7. 在每个地块放置 1 到 8 个建筑 footprint，直到达到目标建筑数。
 8. 按距离中心、城门和外围的规则分配功能；同分时使用稳定摘要决定。
-9. 在不可变 `TownSkeleton` 发布后，`FlowCompiler` 从城门、中心、区中心和地标构建稀疏 FlowGraph，并沿 StreetGraph 求路。
+9. 在不可变 `TownSkeleton` 发布后，`FlowCompiler` 先把全部 junction/street 编译为可运行 StreetGraph，再从城门、中心、区中心和地标构建固定起终点的出行计划并沿图求路。
 10. `FlowCompiler` 用最大余数法把 `population` 精确分配到 flow locations；`pedestrian` 总数必须完全相等。
 11. `FlowCompiler` 完成后规范化数组顺序，组装完整 bundle 和 checksum；浏览器独立从 skeleton 组装 RenderPackage。
 
@@ -551,7 +557,7 @@ coordinateSystem = CARTESIAN
 11 selection           PolygonLayer / PathLayer
 ```
 
-道路热度不使用 KDE 热斑。它通过 `connection_street_ids` 将共享街段的连接统计聚合到物理 TownStreet，再按同一 snapshot 内的绝对 `in_transit` 归一化映射透明度、颜色和宽度；因此高流量始终被约束在街道上，且同一 tick 内数值更大的街道一定更醒目。该版本展示的是关联线路负载；若要得到精确街段驻留，需要在快照中保存街段级队列。
+道路热度不使用 KDE 热斑。引擎依据 route queue 的剩余 tick、物理边长度和 `street_directions`，把每批在途流量投影到唯一 StreetGraph 边，并在公开快照中输出每条街的 `in_transit`、`entered/exited` 和正反方向存量。前端直接按同一 snapshot 内的绝对 `in_transit` 归一化颜色和宽度，不再把整条路线的人数重复加到每一段街道。
 
 ### 10.3 更新频率
 
@@ -562,7 +568,7 @@ coordinateSystem = CARTESIAN
 | 人流点、车辆图标位置 | 新 snapshot，按抽样 slots 更新 |
 | 标签 | 场景切换或选择变化 |
 
-静态数组引用在 tick 间保持不变。动态标记第一版按 connection/type 裁剪（人流最多 30、车流最多 18 个 slot），只在新 snapshot 更新；这保持实现简单，并为后续 `requestAnimationFrame` 插值留下边界。只有 profile 证明动态图层 buffer 更新超过帧预算时，才建立自定义 GPU marker layer。
+静态数组引用在 tick 间保持不变。动态标记按物理街道、方向和 flow type 裁剪（每条街人流最多 6、车流最多 3 个 slot），只在新 snapshot 更新。只有 profile 证明动态图层 buffer 更新超过帧预算时，才建立自定义 GPU marker layer。
 
 ### 10.4 路径绑定
 

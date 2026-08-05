@@ -12,6 +12,7 @@ from .models import (
     FlowLocation,
     FlowTypeConfig,
     SimulationPackage,
+    StreetGraph,
     TownJunction,
     TownSkeleton,
     TownStreet,
@@ -40,12 +41,14 @@ class _Edge:
     path: tuple[tuple[float, float], ...]
     length: float
     width: float
+    forward: bool
 
 
 @dataclass(frozen=True)
 class _Route:
     distance: float
     street_ids: tuple[str, ...]
+    street_directions: tuple[bool, ...]
     path: tuple[tuple[float, float], ...]
 
 
@@ -73,6 +76,7 @@ def _reverse_route(route: _Route) -> _Route:
     return _Route(
         distance=route.distance,
         street_ids=tuple(reversed(route.street_ids)),
+        street_directions=tuple(not forward for forward in reversed(route.street_directions)),
         path=tuple(reversed(route.path)),
     )
 
@@ -85,7 +89,15 @@ def _build_graph(town: TownSkeleton) -> tuple[dict[str, list[_Edge]], dict[str, 
         length = _polyline_length(path)
         if length <= 0:
             raise FlowCompileError(f"street {street.id} has zero length")
-        edge = _Edge(street.id, street.from_junction_id, street.to_junction_id, path, length, street.width)
+        edge = _Edge(
+            street.id,
+            street.from_junction_id,
+            street.to_junction_id,
+            path,
+            length,
+            street.width,
+            True,
+        )
         reverse = _Edge(
             street.id,
             street.to_junction_id,
@@ -93,6 +105,7 @@ def _build_graph(town: TownSkeleton) -> tuple[dict[str, list[_Edge]], dict[str, 
             tuple(reversed(path)),
             length,
             street.width,
+            False,
         )
         if edge.source not in graph or edge.target not in graph:
             raise FlowCompileError(f"street {street.id} references an unknown junction")
@@ -124,7 +137,7 @@ def _dijkstra(graph: dict[str, list[_Edge]], source: str) -> dict[str, _Route]:
     routes: dict[str, _Route] = {}
     for target, (distance, street_ids) in best.items():
         if target == source:
-            routes[target] = _Route(0.0, (), ())
+            routes[target] = _Route(0.0, (), (), ())
             continue
         edges: list[_Edge] = []
         current = target
@@ -137,7 +150,12 @@ def _dijkstra(graph: dict[str, list[_Edge]], source: str) -> dict[str, _Route]:
         for edge in edges:
             for point in edge.path:
                 _append_point(path, point)
-        routes[target] = _Route(distance, street_ids, tuple(path))
+        routes[target] = _Route(
+            distance,
+            street_ids,
+            tuple(edge.forward for edge in edges),
+            tuple(path),
+        )
     return routes
 
 
@@ -316,7 +334,12 @@ def _route_between(
         _append_point(path, point)
     _append_point(path, right_junction.position)
     _append_point(path, right.location.position)
-    return _Route(_polyline_length(path), middle.street_ids, tuple(path))
+    return _Route(
+        _polyline_length(path),
+        middle.street_ids,
+        middle.street_directions,
+        tuple(path),
+    )
 
 
 def _choose_edges(
@@ -403,7 +426,14 @@ def _route_via_street(
                 _append_point(path, point)
             _append_point(path, target.location.position)
             street_ids = tuple(left.street_ids) + (street.id,) + tuple(reversed(right.street_ids))
-            return source_index, target_index, _Route(_polyline_length(path), street_ids, tuple(path))
+            street_directions = (
+                tuple(left.street_directions)
+                + (True,)
+                + tuple(not forward for forward in reversed(right.street_directions))
+            )
+            return source_index, target_index, _Route(
+                _polyline_length(path), street_ids, street_directions, tuple(path)
+            )
     fallback: list[tuple[int, float, str, str, int, int, _Route]] = []
     for source_index, source in source_options[:32]:
         source_junction = location_junctions[source.location.id]
@@ -427,8 +457,15 @@ def _route_via_street(
                 _append_point(path, point)
             _append_point(path, target.location.position)
             street_ids = tuple(left.street_ids) + (street.id,) + tuple(reversed(right.street_ids))
+            street_directions = (
+                tuple(left.street_directions)
+                + (True,)
+                + tuple(not forward for forward in reversed(right.street_directions))
+            )
             repeated = int(street.id in left.street_ids) + int(street.id in right.street_ids)
-            route = _Route(_polyline_length(path), street_ids, tuple(path))
+            route = _Route(
+                _polyline_length(path), street_ids, street_directions, tuple(path)
+            )
             fallback.append((repeated, route.distance, source.location.id, target.location.id, source_index, target_index, route))
     if fallback:
         _, _, _, _, source_index, target_index, route = min(fallback)
@@ -471,7 +508,13 @@ def _connection(
     min_width = min(streets_by_id[street_id].width for street_id in route.street_ids)
     pedestrian_capacity = max(1, math.floor(min_width * 1.5))
     vehicle_capacity = max(1, math.floor(min_width / 2.5))
-    path_length = max(1.0, route.distance)
+    path_length = max(
+        1.0,
+        sum(
+            _polyline_length(streets_by_id[street_id].path)
+            for street_id in route.street_ids
+        ),
+    )
     travel_time = {
         "pedestrian": min(3600, max(1, math.ceil(path_length / 1.4))),
         "vehicle": min(3600, max(1, math.ceil(path_length / 4.0))),
@@ -488,6 +531,10 @@ def _connection(
             from_location_id=source.location.id,
             to_location_id=target.location.id,
             street_segment_ids=list(oriented.street_ids),
+            street_directions=[
+                "forward" if forward else "reverse"
+                for forward in oriented.street_directions
+            ],
             path=list(oriented.path),
             travel_time_ticks=travel_time,
             capacity_per_tick=capacity,
@@ -574,6 +621,9 @@ def compile_flow(town: TownSkeleton) -> SimulationPackage:
             },
             connection_street_ids=connection_street_ids,
         ),
+        street_graph=StreetGraph(
+            junctions=list(junctions), edges=list(streets_by_id.values())
+        ),
     )
     assert_simulation_package(package, town)
     return package
@@ -583,6 +633,7 @@ def assert_simulation_package(package: SimulationPackage, town: TownSkeleton) ->
     flow_ids = {flow.id for flow in package.flow_types}
     location_ids = {location.id for location in package.locations}
     street_ids = {street.id for street in town.streets}
+    streets_by_id = {street.id: street for street in town.streets}
     if len(flow_ids) != len(package.flow_types) or len(location_ids) != len(package.locations):
         raise FlowCompileError("simulation package contains duplicate ids")
     if any(set(location.initial_counts) != flow_ids for location in package.locations):
@@ -609,12 +660,38 @@ def assert_simulation_package(package: SimulationPackage, town: TownSkeleton) ->
             raise FlowCompileError(f"connection {connection.id} has incomplete demand parameters")
         if not set(connection.street_segment_ids) <= street_ids:
             raise FlowCompileError(f"connection {connection.id} references an unknown street")
+        if len(connection.street_directions) != len(connection.street_segment_ids):
+            raise FlowCompileError(f"connection {connection.id} has incomplete street directions")
+        oriented_endpoints = [
+            (
+                (street.from_junction_id, street.to_junction_id)
+                if direction == "forward"
+                else (street.to_junction_id, street.from_junction_id)
+            )
+            for street_id, direction in zip(
+                connection.street_segment_ids, connection.street_directions
+            )
+            for street in (streets_by_id[street_id],)
+        ]
+        if any(
+            left[1] != right[0]
+            for left, right in zip(oriented_endpoints, oriented_endpoints[1:])
+        ):
+            raise FlowCompileError(f"connection {connection.id} has a disconnected street route")
         if connection.path[0] != next(location.position for location in package.locations if location.id == connection.from_location_id):
             raise FlowCompileError(f"connection {connection.id} path has an invalid source")
         if connection.path[-1] != next(location.position for location in package.locations if location.id == connection.to_location_id):
             raise FlowCompileError(f"connection {connection.id} path has an invalid destination")
         if _polyline_length(connection.path) <= 0:
             raise FlowCompileError(f"connection {connection.id} has zero length")
+    if package.street_graph is None:
+        raise FlowCompileError("simulation package has no street graph")
+    if {junction.id for junction in package.street_graph.junctions} != {
+        junction.id for junction in town.junctions
+    }:
+        raise FlowCompileError("street graph junctions do not match the generated town")
+    if {edge.id for edge in package.street_graph.edges} != street_ids:
+        raise FlowCompileError("street graph edges do not match the generated town")
 
 
 def simulation_package_checksum(package: SimulationPackage) -> str:

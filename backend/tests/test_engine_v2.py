@@ -53,3 +53,14 @@ def test_v2_engine_is_deterministic_and_conserves_population() -> None:
         == snapshot.totals[flow_id]
         for flow_id in snapshot.totals
     )
+    assert package.street_graph is not None
+    assert set(snapshot.streets) == {edge.id for edge in package.street_graph.edges}
+    for flow_id in snapshot.totals:
+        street_transit = sum(values[flow_id].in_transit for values in snapshot.streets.values())
+        route_transit = sum(values[flow_id].in_transit for values in snapshot.connections.values())
+        assert street_transit == route_transit
+        assert all(
+            values[flow_id].forward_in_transit + values[flow_id].reverse_in_transit
+            == values[flow_id].in_transit
+            for values in snapshot.streets.values()
+        )

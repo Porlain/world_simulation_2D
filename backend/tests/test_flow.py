@@ -46,6 +46,9 @@ def test_connections_are_bound_to_streets_and_location_endpoints() -> None:
         )
         assert location.initial_counts["pedestrian"] > 0
     assert set(package.bindings.connection_street_ids) == {connection.id for connection in package.connections}
+    assert package.street_graph is not None
+    assert package.street_graph.junctions == town.junctions
+    assert package.street_graph.edges == town.streets
     assert {
         street_id
         for connection in package.connections
@@ -53,6 +56,7 @@ def test_connections_are_bound_to_streets_and_location_endpoints() -> None:
     } == street_ids
     for connection in package.connections:
         assert set(connection.street_segment_ids) <= street_ids
+        assert len(connection.street_directions) == len(connection.street_segment_ids)
         assert connection.path[0] == locations[connection.from_location_id].position
         assert connection.path[-1] == locations[connection.to_location_id].position
         assert connection.travel_time_ticks["pedestrian"] >= connection.travel_time_ticks["vehicle"]

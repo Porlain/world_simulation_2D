@@ -185,6 +185,7 @@ class FlowConnection(StrictModel):
     from_location_id: Identifier
     to_location_id: Identifier
     street_segment_ids: list[Identifier] = Field(min_length=1)
+    street_directions: list[Literal["forward", "reverse"]] = Field(default_factory=list)
     path: list[Coordinate] = Field(min_length=2)
     travel_time_ticks: dict[str, PositiveTick]
     capacity_per_tick: CountMap
@@ -196,6 +197,11 @@ class FlowBindings(StrictModel):
     connection_street_ids: dict[str, list[Identifier]]
 
 
+class StreetGraph(StrictModel):
+    junctions: list[TownJunction] = Field(min_length=1)
+    edges: list[TownStreet] = Field(min_length=1)
+
+
 class SimulationPackage(StrictModel):
     schema_version: Literal[2] = 2
     tick_seconds: Literal[1] = 1
@@ -203,6 +209,7 @@ class SimulationPackage(StrictModel):
     locations: list[FlowLocation] = Field(min_length=2)
     connections: list[FlowConnection] = Field(min_length=1)
     bindings: FlowBindings
+    street_graph: StreetGraph | None = None
 
 
 class RunCreateRequest(StrictModel):
@@ -257,9 +264,18 @@ class ConnectionSnapshot(StrictModel):
     in_transit: NonNegativeInt
 
 
+class StreetSnapshot(StrictModel):
+    entered: NonNegativeInt
+    exited: NonNegativeInt
+    in_transit: NonNegativeInt
+    forward_in_transit: NonNegativeInt
+    reverse_in_transit: NonNegativeInt
+
+
 class FlowSnapshot(StrictModel):
     schema_version: Literal[2] = 2
     tick: int = Field(ge=0)
     location_counts: dict[str, CountMap]
     connections: dict[str, dict[str, ConnectionSnapshot]]
+    streets: dict[str, dict[str, StreetSnapshot]] = Field(default_factory=dict)
     totals: CountMap
