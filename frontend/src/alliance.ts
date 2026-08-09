@@ -68,8 +68,14 @@ type AlliancePlacementBounds = { x0: number; x1: number; y0: number; y1: number 
 function alliancePlacement(seed: number): AlliancePlacementBounds {
   const width = 520;
   const height = 500;
-  const x0 = 70 + Math.round(stableUnit(seed, "alliance-placement-x") * 110);
-  const y0 = 70 + Math.round(stableUnit(seed, "alliance-placement-y") * 340);
+  const marginX = 60;
+  const marginY = 50;
+  const x0 = marginX + Math.round(
+    stableUnit(seed, "alliance-placement-x") * (BOUNDS[2] - width - marginX * 2),
+  );
+  const y0 = marginY + Math.round(
+    stableUnit(seed, "alliance-placement-y") * (BOUNDS[3] - height - marginY * 2),
+  );
   return { x0, x1: x0 + width, y0, y1: y0 + height };
 }
 
