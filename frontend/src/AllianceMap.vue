@@ -57,8 +57,8 @@ const mapViewBox = computed(() => {
 
 const zoomLabel = computed(() => `${Math.round(zoomFactor.value * 100)}%`);
 const territoryLabelPosition = computed(() => [
-  Math.min(...props.alliance.territory.map(([x]) => x)) + 18,
-  Math.min(...props.alliance.territory.map(([, y]) => y)) + 34,
+  Math.min(...props.alliance.territory.map(([x]) => x)) + 4,
+  Math.max(36, Math.min(...props.alliance.territory.map(([, y]) => y)) - 18),
 ]);
 
 function viewBoxNumbers(): [number, number, number, number] {
