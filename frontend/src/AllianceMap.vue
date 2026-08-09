@@ -38,7 +38,7 @@ const equatorLabelPosition = computed(() => [
 const animationTick = ref(0);
 const compactView = ref(false);
 const zoomFactor = ref(1);
-const viewCenter = ref<[number, number]>([800, 500]);
+const viewCenter = ref<[number, number]>(worldCenter.value);
 const isPanning = ref(false);
 const dragMoved = ref(false);
 let panPointerId: number | null = null;
