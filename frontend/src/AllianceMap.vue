@@ -8,6 +8,7 @@ import {
   type AllianceModel,
   type AllianceSettlement,
 } from "./alliance";
+import type { Coordinate } from "./api";
 
 const props = defineProps<{
   alliance: AllianceModel;
@@ -172,6 +173,81 @@ const flowDots = computed(() => props.alliance.roads.flatMap((road, roadIndex) =
   });
 }));
 
+// Keep the climate field deterministic: the same world seed always produces the same biome mix.
+type TerrainPatchKind = "ice" | "tundra" | "taiga" | "forest" | "meadow" | "steppe" | "desert" | "savanna" | "rainforest" | "wetland" | "rock";
+
+interface TerrainPatch {
+  id: string;
+  cx: number;
+  cy: number;
+  rx: number;
+  ry: number;
+  kind: TerrainPatchKind;
+  rotation: number;
+  opacity: number;
+}
+
+function terrainUnit(seed: number, key: string): number {
+  let hash = (seed ^ 0x9e3779b9) >>> 0;
+  for (const character of key) hash = Math.imul(hash ^ character.charCodeAt(0), 0x85ebca6b);
+  hash ^= hash >>> 13;
+  hash = Math.imul(hash, 0xc2b2ae35);
+  return ((hash ^ (hash >>> 16)) >>> 0) / 0xffffffff;
+}
+
+function terrainBounds(points: Coordinate[]): { x0: number; x1: number; y0: number; y1: number } {
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+}
+
+function climateSafeKind(kind: TerrainPatchKind, y: number): TerrainPatchKind {
+  const polar = y < 150 || y > 850;
+  const cold = y < 315 || y > 685;
+  if (kind === "desert" && polar) return "tundra";
+  if (kind === "desert" && cold) return "steppe";
+  if (kind === "rainforest" && cold) return "forest";
+  if (kind === "savanna" && polar) return "steppe";
+  if (kind === "wetland" && polar) return "tundra";
+  return kind;
+}
+
+const terrainPatches = computed<TerrainPatch[]>(() => {
+  const recipes: Array<{ kind: TerrainPatchKind; x: number; y: number; rx: number; ry: number }> = [
+    { kind: "forest", x: 0.24, y: 0.24, rx: 0.34, ry: 0.34 },
+    { kind: "desert", x: 0.70, y: 0.39, rx: 0.31, ry: 0.24 },
+    { kind: "wetland", x: 0.48, y: 0.69, rx: 0.29, ry: 0.25 },
+    { kind: "rock", x: 0.82, y: 0.18, rx: 0.24, ry: 0.27 },
+  ];
+  return props.alliance.landmasses.flatMap((landmass, landmassIndex) => {
+    const bounds = terrainBounds(landmass);
+    const width = Math.max(1, bounds.x1 - bounds.x0);
+    const height = Math.max(1, bounds.y1 - bounds.y0);
+    return recipes.map((recipe, recipeIndex) => {
+      const jitterX = (terrainUnit(props.alliance.seed, `${landmassIndex}:x:${recipeIndex}`) - 0.5) * 0.22;
+      const jitterY = (terrainUnit(props.alliance.seed, `${landmassIndex}:y:${recipeIndex}`) - 0.5) * 0.18;
+      const cx = bounds.x0 + width * Math.max(0.08, Math.min(0.92, recipe.x + jitterX));
+      const cy = bounds.y0 + height * Math.max(0.08, Math.min(0.92, recipe.y + jitterY));
+      const variantKind = landmassIndex === 2 && recipeIndex === 0 ? "rainforest" : recipe.kind;
+      return {
+        id: `terrain-patch-${landmassIndex}-${recipeIndex}`,
+        cx,
+        cy,
+        rx: width * recipe.rx * (0.86 + terrainUnit(props.alliance.seed, `${landmassIndex}:rx:${recipeIndex}`) * 0.2),
+        ry: height * recipe.ry * (0.86 + terrainUnit(props.alliance.seed, `${landmassIndex}:ry:${recipeIndex}`) * 0.2),
+        kind: climateSafeKind(variantKind, cy),
+        rotation: (terrainUnit(props.alliance.seed, `${landmassIndex}:rotation:${recipeIndex}`) - 0.5) * 28,
+        opacity: 0.44 + terrainUnit(props.alliance.seed, `${landmassIndex}:opacity:${recipeIndex}`) * 0.16,
+      };
+    });
+  });
+});
+
+function landmassVariant(index: number): number {
+  const seedOffset = Math.floor(terrainUnit(props.alliance.seed, "landmass-texture-offset") * 4);
+  return (index + seedOffset) % 4;
+}
+
 function settlementRadius(settlement: AllianceSettlement): number {
   return settlement.kind === "capital" ? 16 : settlement.kind === "town" ? 10 : 5;
 }
@@ -238,6 +314,96 @@ onUnmounted(() => {
           <circle cx="8" cy="18" r="1.3" class="alliance-land-texture__speck" />
           <circle cx="29" cy="28" r="1" class="alliance-land-texture__speck" />
         </pattern>
+        <pattern id="alliance-land-texture-dry" width="82" height="82" patternUnits="userSpaceOnUse">
+          <rect width="82" height="82" class="alliance-land-texture__dry-ground" />
+          <path d="M-5 18 C18 7 32 25 58 12 S79 5 88 15 M-8 55 C11 42 36 62 58 47 S79 41 90 52" class="alliance-land-texture__dry-ridge" />
+          <path d="M12 70 l7 -4 m24 9 l9 -5 m20 -18 l7 -4" class="alliance-land-texture__dry-speck" />
+        </pattern>
+        <pattern id="alliance-land-texture-forest" width="74" height="74" patternUnits="userSpaceOnUse">
+          <rect width="74" height="74" class="alliance-land-texture__forest-ground" />
+          <path d="M4 54 C15 43 22 47 31 34 S48 22 62 28 M-6 20 C10 30 19 18 29 11 S53 4 80 15" class="alliance-land-texture__forest-grain" />
+          <circle cx="16" cy="22" r="4" class="alliance-land-texture__canopy" />
+          <circle cx="50" cy="50" r="5" class="alliance-land-texture__canopy" />
+          <circle cx="63" cy="13" r="2.5" class="alliance-land-texture__canopy-small" />
+        </pattern>
+        <pattern id="alliance-land-texture-rock" width="88" height="88" patternUnits="userSpaceOnUse">
+          <rect width="88" height="88" class="alliance-land-texture__rock-ground" />
+          <path d="M-6 65 L23 31 L42 52 L64 17 L94 40 M-10 88 L19 69 L38 83 L72 58 L96 72" class="alliance-land-texture__rock-ridge" />
+          <path d="M13 15 l10 8 -13 5 z M58 71 l12 6 -11 6 z" class="alliance-land-texture__rock-facet" />
+        </pattern>
+        <linearGradient id="alliance-climate-gradient" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="oklch(0.84 0.045 185)" stop-opacity="0.84" />
+          <stop offset="0.09" stop-color="oklch(0.68 0.065 163)" stop-opacity="0.56" />
+          <stop offset="0.22" stop-color="oklch(0.5 0.095 145)" stop-opacity="0.4" />
+          <stop offset="0.37" stop-color="oklch(0.62 0.095 122)" stop-opacity="0.46" />
+          <stop offset="0.49" stop-color="oklch(0.66 0.1 82)" stop-opacity="0.56" />
+          <stop offset="0.61" stop-color="oklch(0.54 0.115 124)" stop-opacity="0.52" />
+          <stop offset="0.76" stop-color="oklch(0.61 0.09 118)" stop-opacity="0.42" />
+          <stop offset="0.9" stop-color="oklch(0.69 0.06 160)" stop-opacity="0.54" />
+          <stop offset="1" stop-color="oklch(0.84 0.045 185)" stop-opacity="0.84" />
+        </linearGradient>
+        <radialGradient id="alliance-ice-gradient">
+          <stop offset="0" stop-color="oklch(0.92 0.025 186)" stop-opacity="0.76" />
+          <stop offset="0.55" stop-color="oklch(0.79 0.05 182)" stop-opacity="0.3" />
+          <stop offset="1" stop-color="oklch(0.79 0.05 182)" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="alliance-tundra-gradient">
+          <stop offset="0" stop-color="oklch(0.7 0.07 155)" stop-opacity="0.66" />
+          <stop offset="0.64" stop-color="oklch(0.62 0.065 151)" stop-opacity="0.22" />
+          <stop offset="1" stop-color="oklch(0.62 0.065 151)" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="alliance-taiga-gradient">
+          <stop offset="0" stop-color="oklch(0.42 0.1 145)" stop-opacity="0.58" />
+          <stop offset="0.7" stop-color="oklch(0.44 0.09 145)" stop-opacity="0.18" />
+          <stop offset="1" stop-color="oklch(0.44 0.09 145)" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="alliance-forest-gradient">
+          <stop offset="0" stop-color="oklch(0.44 0.12 137)" stop-opacity="0.58" />
+          <stop offset="0.68" stop-color="oklch(0.5 0.1 132)" stop-opacity="0.18" />
+          <stop offset="1" stop-color="oklch(0.5 0.1 132)" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="alliance-meadow-gradient">
+          <stop offset="0" stop-color="oklch(0.65 0.1 119)" stop-opacity="0.58" />
+          <stop offset="0.7" stop-color="oklch(0.64 0.08 119)" stop-opacity="0.19" />
+          <stop offset="1" stop-color="oklch(0.64 0.08 119)" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="alliance-steppe-gradient">
+          <stop offset="0" stop-color="oklch(0.7 0.11 81)" stop-opacity="0.62" />
+          <stop offset="0.64" stop-color="oklch(0.67 0.08 82)" stop-opacity="0.24" />
+          <stop offset="1" stop-color="oklch(0.67 0.08 82)" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="alliance-desert-gradient">
+          <stop offset="0" stop-color="oklch(0.73 0.12 74)" stop-opacity="0.78" />
+          <stop offset="0.54" stop-color="oklch(0.68 0.1 73)" stop-opacity="0.38" />
+          <stop offset="1" stop-color="oklch(0.68 0.1 73)" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="alliance-savanna-gradient">
+          <stop offset="0" stop-color="oklch(0.63 0.11 105)" stop-opacity="0.62" />
+          <stop offset="0.68" stop-color="oklch(0.61 0.08 105)" stop-opacity="0.2" />
+          <stop offset="1" stop-color="oklch(0.61 0.08 105)" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="alliance-rainforest-gradient">
+          <stop offset="0" stop-color="oklch(0.4 0.14 145)" stop-opacity="0.7" />
+          <stop offset="0.64" stop-color="oklch(0.45 0.11 143)" stop-opacity="0.24" />
+          <stop offset="1" stop-color="oklch(0.45 0.11 143)" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="alliance-wetland-gradient">
+          <stop offset="0" stop-color="oklch(0.49 0.1 174)" stop-opacity="0.54" />
+          <stop offset="0.66" stop-color="oklch(0.52 0.08 171)" stop-opacity="0.18" />
+          <stop offset="1" stop-color="oklch(0.52 0.08 171)" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="alliance-rock-gradient">
+          <stop offset="0" stop-color="oklch(0.5 0.045 92)" stop-opacity="0.62" />
+          <stop offset="0.64" stop-color="oklch(0.48 0.04 93)" stop-opacity="0.2" />
+          <stop offset="1" stop-color="oklch(0.48 0.04 93)" stop-opacity="0" />
+        </radialGradient>
+        <filter id="alliance-terrain-noise" x="-10%" y="-10%" width="120%" height="120%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.012 0.026" numOctaves="3" seed="17" />
+          <feColorMatrix type="saturate" values="0" />
+          <feComponentTransfer>
+            <feFuncA type="table" tableValues="0 0.16" />
+          </feComponentTransfer>
+        </filter>
         <clipPath id="alliance-land-clip">
           <polygon v-for="(landmass, index) in alliance.landmasses" :key="`land-clip-${index}`" :points="alliancePolygon(landmass)" />
         </clipPath>
@@ -250,7 +416,15 @@ onUnmounted(() => {
       <rect x="0" y="0" width="1600" height="1000" class="alliance-map__grid" />
 
       <g class="alliance-landmasses" aria-label="陆地">
-        <polygon v-for="(landmass, index) in alliance.landmasses" :key="`landmass-${index}`" :points="alliancePolygon(landmass)" class="alliance-landmass" />
+        <polygon v-for="(landmass, index) in alliance.landmasses" :key="`landmass-${index}`" :points="alliancePolygon(landmass)" :class="['alliance-landmass', `alliance-landmass--variant-${landmassVariant(index)}`]" />
+      </g>
+
+      <g class="alliance-climate-field" clip-path="url(#alliance-land-clip)" aria-label="气候渐变">
+        <rect x="0" y="0" width="1600" height="1000" class="alliance-climate-field__gradient" />
+        <rect x="0" y="0" width="1600" height="1000" class="alliance-climate-field__noise" />
+        <ellipse cx="800" cy="52" rx="920" ry="185" class="alliance-climate-wash alliance-climate-wash--ice" />
+        <ellipse cx="800" cy="948" rx="920" ry="185" class="alliance-climate-wash alliance-climate-wash--ice" />
+        <ellipse v-for="patch in terrainPatches" :key="patch.id" :cx="patch.cx" :cy="patch.cy" :rx="patch.rx" :ry="patch.ry" :transform="`rotate(${patch.rotation} ${patch.cx} ${patch.cy})`" :class="['alliance-biome-patch', `alliance-biome-patch--${patch.kind}`]" :style="{ opacity: patch.opacity }" />
       </g>
 
       <g class="alliance-territory" aria-label="人类联盟控制区">
@@ -259,7 +433,6 @@ onUnmounted(() => {
       </g>
 
       <g class="alliance-latitudes" clip-path="url(#alliance-land-clip)">
-        <rect v-for="band in alliance.bands" :key="band.id" x="0" :y="band.y0" width="1600" :height="band.y1 - band.y0" :class="`alliance-band alliance-band--${band.kind}`" />
         <text v-for="band in alliance.bands" :key="`${band.id}-label`" x="34" :y="(band.y0 + band.y1) / 2" class="alliance-band-label">{{ band.label }}</text>
         <path d="M0 500 L1600 500" class="alliance-equator" />
         <text x="1320" y="492" class="alliance-equator-label">赤道</text>
@@ -318,6 +491,10 @@ onUnmounted(() => {
       <span><i class="alliance-legend-swatch alliance-legend-swatch--lake"></i>湖泊</span>
       <span><i class="alliance-legend-line alliance-legend-line--road"></i>联盟道路</span>
       <span><i class="alliance-legend-line alliance-legend-line--influence"></i>主城辐射范围</span>
+      <span><i class="alliance-legend-biome alliance-legend-biome--polar"></i>冻原</span>
+      <span><i class="alliance-legend-biome alliance-legend-biome--temperate"></i>温带</span>
+      <span><i class="alliance-legend-biome alliance-legend-biome--arid"></i>干旱带</span>
+      <span><i class="alliance-legend-biome alliance-legend-biome--equatorial"></i>湿热带</span>
     </div>
   </div>
 </template>
@@ -327,7 +504,11 @@ onUnmounted(() => {
   position: absolute;
   inset: 0 calc(var(--inspector-width) + var(--resizer-size)) 0 calc(var(--rail-width) + var(--resizer-size));
   overflow: hidden;
-  background: #0b2b31;
+  --terrain-ocean: oklch(0.27 0.055 215);
+  --terrain-land: oklch(0.46 0.08 137);
+  --terrain-edge: oklch(0.72 0.07 125);
+  --terrain-ink: oklch(0.9 0.035 150);
+  background: var(--terrain-ocean);
 }
 
 .alliance-map__svg {
@@ -374,24 +555,50 @@ onUnmounted(() => {
 }
 .alliance-map__zoom-controls span { min-width: 38px; text-align: center; }
 
-.alliance-map__ground { fill: #0b2b31; }
-.alliance-ocean-texture { opacity: 0.2; mix-blend-mode: screen; }
+.alliance-map__ground { fill: var(--terrain-ocean); }
+.alliance-ocean-texture { opacity: 0.16; mix-blend-mode: screen; filter: saturate(0.72) contrast(0.88); }
 .alliance-map__grid { fill: url("#alliance-grid"); opacity: 0.24; }
-.alliance-grid-line { stroke: #8caea1; stroke-width: 1; opacity: 0.14; }
-.alliance-landmass { fill: url("#alliance-land-texture"); stroke: #9ab28e; stroke-width: 2.2; opacity: 0.92; }
-.alliance-land-texture__ground { fill: #3f6353; }
-.alliance-land-texture__grain { fill: none; stroke: #79977a; stroke-width: 1; opacity: 0.28; }
-.alliance-land-texture__speck { fill: #aec18e; opacity: 0.36; }
-.alliance-band { opacity: 0.22; }
-.alliance-band--polar { fill: #b6d7d2; opacity: 0.16; }
-.alliance-band--cold { fill: #4f8c82; }
-.alliance-band--temperate { fill: #477b68; }
-.alliance-band--equatorial { fill: #8b9560; opacity: 0.18; }
-.alliance-band-label { fill: #d7e5d8; font: 600 15px "Noto Sans SC Variable", sans-serif; letter-spacing: 1px; opacity: 0.64; }
-.alliance-equator { stroke: #d7bd6a; stroke-width: 2; stroke-dasharray: 9 10; opacity: 0.8; }
-.alliance-equator-label { fill: #efd789; font: 700 14px "Noto Sans SC Variable", sans-serif; }
-.alliance-territory__fill { fill: #c5a854; fill-opacity: 0.12; stroke: #d9bb66; stroke-width: 3; stroke-dasharray: 12 10; }
-.alliance-territory__label { fill: #f1d58a; font: 700 19px "Noto Sans SC Variable", sans-serif; letter-spacing: 1px; paint-order: stroke; stroke: #173235; stroke-width: 6px; }
+.alliance-grid-line { stroke: oklch(0.75 0.055 155); stroke-width: 1; opacity: 0.14; }
+.alliance-landmass { stroke: var(--terrain-edge); stroke-width: 2.2; opacity: 0.94; }
+.alliance-landmass--variant-0 { fill: url("#alliance-land-texture"); }
+.alliance-landmass--variant-1 { fill: url("#alliance-land-texture-dry"); }
+.alliance-landmass--variant-2 { fill: url("#alliance-land-texture-forest"); }
+.alliance-landmass--variant-3 { fill: url("#alliance-land-texture-rock"); }
+.alliance-land-texture__ground { fill: var(--terrain-land); }
+.alliance-land-texture__grain { fill: none; stroke: oklch(0.67 0.07 135); stroke-width: 1; opacity: 0.28; }
+.alliance-land-texture__speck { fill: oklch(0.8 0.08 112); opacity: 0.36; }
+.alliance-land-texture__dry-ground { fill: oklch(0.58 0.09 90); }
+.alliance-land-texture__dry-ridge { fill: none; stroke: oklch(0.72 0.08 84); stroke-width: 1.2; opacity: 0.42; }
+.alliance-land-texture__dry-speck { fill: none; stroke: oklch(0.8 0.08 76); stroke-width: 2; opacity: 0.42; }
+.alliance-land-texture__forest-ground { fill: oklch(0.43 0.1 141); }
+.alliance-land-texture__forest-grain { fill: none; stroke: oklch(0.62 0.1 134); stroke-width: 1.1; opacity: 0.36; }
+.alliance-land-texture__canopy { fill: oklch(0.35 0.11 143); opacity: 0.55; }
+.alliance-land-texture__canopy-small { fill: oklch(0.7 0.09 125); opacity: 0.5; }
+.alliance-land-texture__rock-ground { fill: oklch(0.43 0.05 105); }
+.alliance-land-texture__rock-ridge { fill: none; stroke: oklch(0.63 0.05 100); stroke-width: 1.6; opacity: 0.42; }
+.alliance-land-texture__rock-facet { fill: oklch(0.7 0.05 94); opacity: 0.34; }
+.alliance-climate-field { mix-blend-mode: multiply; pointer-events: none; }
+.alliance-climate-field__gradient { fill: url("#alliance-climate-gradient"); opacity: 0.72; }
+.alliance-climate-field__noise { fill: oklch(0.74 0.025 120); opacity: 0.22; filter: url("#alliance-terrain-noise"); mix-blend-mode: soft-light; }
+.alliance-climate-wash { pointer-events: none; }
+.alliance-climate-wash--ice { fill: url("#alliance-ice-gradient"); }
+.alliance-biome-patch { pointer-events: none; }
+.alliance-biome-patch--ice { fill: url("#alliance-ice-gradient"); }
+.alliance-biome-patch--tundra { fill: url("#alliance-tundra-gradient"); }
+.alliance-biome-patch--taiga { fill: url("#alliance-taiga-gradient"); }
+.alliance-biome-patch--forest { fill: url("#alliance-forest-gradient"); }
+.alliance-biome-patch--meadow { fill: url("#alliance-meadow-gradient"); }
+.alliance-biome-patch--steppe { fill: url("#alliance-steppe-gradient"); }
+.alliance-biome-patch--desert { fill: url("#alliance-desert-gradient"); }
+.alliance-biome-patch--savanna { fill: url("#alliance-savanna-gradient"); }
+.alliance-biome-patch--rainforest { fill: url("#alliance-rainforest-gradient"); }
+.alliance-biome-patch--wetland { fill: url("#alliance-wetland-gradient"); }
+.alliance-biome-patch--rock { fill: url("#alliance-rock-gradient"); }
+.alliance-band-label { fill: var(--terrain-ink); font: 600 15px "Noto Sans SC Variable", sans-serif; letter-spacing: 1px; opacity: 0.66; paint-order: stroke; stroke: var(--terrain-ocean); stroke-width: 4px; }
+.alliance-equator { stroke: oklch(0.82 0.12 88); stroke-width: 2; stroke-dasharray: 9 10; opacity: 0.82; }
+.alliance-equator-label { fill: oklch(0.9 0.1 88); font: 700 14px "Noto Sans SC Variable", sans-serif; paint-order: stroke; stroke: var(--terrain-ocean); stroke-width: 4px; }
+.alliance-territory__fill { fill: oklch(0.76 0.12 82); fill-opacity: 0.12; stroke: oklch(0.84 0.12 84); stroke-width: 3; stroke-dasharray: 12 10; }
+.alliance-territory__label { fill: oklch(0.91 0.1 88); font: 700 19px "Noto Sans SC Variable", sans-serif; letter-spacing: 1px; paint-order: stroke; stroke: oklch(0.28 0.055 203); stroke-width: 6px; }
 .alliance-influence { stroke-width: 2.5; stroke-dasharray: 12 10; opacity: 0.9; }
 .alliance-influence--0 { fill: #c8a34e; fill-opacity: 0.08; stroke: #e7c86d; }
 .alliance-influence--1 { fill: #6fb5a0; fill-opacity: 0.07; stroke: #9bd4bc; }
@@ -444,6 +651,11 @@ onUnmounted(() => {
 .alliance-legend-line { width: 20px; height: 3px; background: #73c4cd; }
 .alliance-legend-line--road { background: #e0bc70; }
 .alliance-legend-line--influence { height: 0; border-top: 2px dashed #e7c86d; background: transparent; }
+.alliance-legend-biome { display: inline-block; width: 20px; height: 7px; margin-right: 5px; border-radius: 2px; }
+.alliance-legend-biome--polar { background: linear-gradient(90deg, oklch(0.84 0.045 185), oklch(0.68 0.065 163)); }
+.alliance-legend-biome--temperate { background: linear-gradient(90deg, oklch(0.5 0.095 145), oklch(0.62 0.095 122)); }
+.alliance-legend-biome--arid { background: linear-gradient(90deg, oklch(0.66 0.1 82), oklch(0.73 0.12 74)); }
+.alliance-legend-biome--equatorial { background: linear-gradient(90deg, oklch(0.54 0.115 124), oklch(0.4 0.14 145)); }
 
 @media (max-width: 899px) {
   .alliance-map { inset: 0; }

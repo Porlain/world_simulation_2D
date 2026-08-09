@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import { Activity, AlertTriangle, Menu, Moon, Sun, X } from "lucide-vue-next";
 import ControlRail from "./ControlRail.vue";
 import CityMap from "./CityMap.vue";
@@ -59,7 +59,11 @@ const mapClarity = ref<MapClarity>("standard");
 const mobilePanel = ref<"controls" | "stats" | null>(null);
 type WorldView = "alliance" | "town";
 const worldView = ref<WorldView>("alliance");
-const alliance = createAlliance();
+function randomWorldSeed(): number {
+  return Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+}
+
+const alliance = shallowRef(createAlliance(randomWorldSeed()));
 const selectedAllianceId = ref<string | null>(null);
 const allianceTransitioning = ref(false);
 const worldRunStatus = ref<RunRecord["status"] | "idle">("idle");
@@ -128,17 +132,17 @@ const activeTownName = computed(() =>
 );
 
 const focusedAllianceSettlement = computed(() =>
-  alliance.settlements.find((settlement) => settlement.id === selectedAllianceId.value) ?? null,
+  alliance.value.settlements.find((settlement) => settlement.id === selectedAllianceId.value) ?? null,
 );
 const focusedAllianceParent = computed(() => {
   const parentId = focusedAllianceSettlement.value?.parentId;
-  return parentId ? alliance.settlements.find((settlement) => settlement.id === parentId) ?? null : null;
+  return parentId ? alliance.value.settlements.find((settlement) => settlement.id === parentId) ?? null : null;
 });
 
 const allianceCounts = computed(() => ({
-  capitals: alliance.settlements.filter((settlement) => settlement.kind === "capital").length,
-  towns: alliance.settlements.filter((settlement) => settlement.kind === "town").length,
-  villages: alliance.settlements.filter((settlement) => settlement.kind === "village").length,
+  capitals: alliance.value.settlements.filter((settlement) => settlement.kind === "capital").length,
+  towns: alliance.value.settlements.filter((settlement) => settlement.kind === "town").length,
+  villages: alliance.value.settlements.filter((settlement) => settlement.kind === "village").length,
 }));
 
 const selectedLocation = computed(() => {
@@ -389,6 +393,31 @@ async function pollDraft(draftId: string) {
   }
 }
 
+function generateWorld(payload: { generationSeed?: number }) {
+  if (
+    activeRun.value
+    || generationLoading.value
+    || worldRunStatus.value === "running"
+    || worldRunStatus.value === "paused"
+  ) return;
+  clearTimers();
+  generationLoading.value = true;
+  error.value = null;
+  worldView.value = "alliance";
+  worldRunStatus.value = "idle";
+  worldRunRate.value = 1;
+  alliance.value = createAlliance(payload.generationSeed ?? randomWorldSeed());
+  selectedAllianceId.value = null;
+  selectedScenarioId.value = null;
+  selectedRun.value = null;
+  selectedBundle.value = null;
+  latestSnapshot.value = null;
+  displayedSnapshot.value = null;
+  selectedFeatureId.value = null;
+  draft.value = null;
+  generationLoading.value = false;
+}
+
 async function generateTown(payload: { generationSeed?: number; population: number; generationSize?: "village" | "town" | "city"; name?: string }) {
   if (activeRun.value) return;
   if (draftPollTimer !== null) window.clearTimeout(draftPollTimer);
@@ -427,7 +456,7 @@ function selectAllianceSettlement(settlement: AllianceSettlement) {
 }
 
 function enterAllianceSettlementById(settlementId: string) {
-  const settlement = alliance.settlements.find((item) => item.id === settlementId);
+  const settlement = alliance.value.settlements.find((item) => item.id === settlementId);
   if (settlement) void enterAllianceSettlement(settlement);
 }
 
@@ -799,6 +828,7 @@ onUnmounted(() => {
     <main class="map-workspace" :style="workspaceStyle">
       <AllianceMap
         v-if="worldView === 'alliance'"
+        :key="alliance.seed"
         :alliance="alliance"
         :selected-id="selectedAllianceId"
         :theme="theme"
@@ -842,6 +872,8 @@ onUnmounted(() => {
             {{ allianceCounts.towns }} 城镇
             <span aria-hidden="true">·</span>
             {{ allianceCounts.villages }} 村庄
+            <span aria-hidden="true">·</span>
+            SEED {{ alliance.seed }}
             <span aria-hidden="true">·</span>
             {{ worldRunStatus === "running" ? "交通运行中" : worldRunStatus === "paused" ? "交通已暂停" : "交通待启动" }}
           </p>
@@ -1059,7 +1091,8 @@ onUnmounted(() => {
               @start="handleStart"
               @command="handleCommand"
               @set-rate="handleSetRate"
-              @generate-town="generateTown"
+              @generate-world="generateWorld"
+              @back-to-alliance="backToAlliance"
               @toggle-layer="toggleLayer"
               @set-flow-density="flowDensity = $event"
               @set-map-clarity="mapClarity = $event"

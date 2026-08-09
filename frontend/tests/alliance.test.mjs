@@ -10,6 +10,9 @@ test("alliance generation is deterministic and keeps its settlement hierarchy", 
 
   assert.deepEqual(first, second);
   assert.notDeepEqual(first.territory, anotherWorld.territory);
+  assert.notDeepEqual(first.landmasses, anotherWorld.landmasses);
+  assert.notDeepEqual(first.rivers, anotherWorld.rivers);
+  assert.notDeepEqual(first.mountains, anotherWorld.mountains);
   assert.equal(first.settlements.filter((item) => item.kind === "capital").length, 5);
   assert.equal(first.settlements.filter((item) => item.kind === "town").length, 23);
   assert.equal(first.settlements.filter((item) => item.kind === "village").length, 69);

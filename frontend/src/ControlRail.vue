@@ -31,7 +31,8 @@ const emit = defineEmits<{
   (event: "start", seed?: number): void;
   (event: "command", action: "pause" | "resume" | "end"): void;
   (event: "set-rate", rate: RunRate): void;
-  (event: "generate-town", payload: { generationSeed?: number; population: number; generationSize?: "village" | "town" | "city" }): void;
+  (event: "generate-world", payload: { generationSeed?: number }): void;
+  (event: "back-to-alliance"): void;
   (event: "toggle-layer", layer: keyof TownLayerVisibility): void;
   (event: "set-flow-density", density: number): void;
   (event: "set-map-clarity", clarity: MapClarity): void;
@@ -40,8 +41,6 @@ const emit = defineEmits<{
 
 const seedInput = ref("");
 const generationSeedInput = ref("");
-const generationSizeInput = ref<"village" | "town" | "city">("town");
-const populationInput = ref("11499");
 const rateOptions: RunRate[] = [0.5, 1, 2, 4];
 const layerOptions: Array<{ key: keyof TownLayerVisibility; label: string }> = [
   { key: "walls", label: "城墙" },
@@ -74,6 +73,7 @@ const controlStatus = computed<RunStatus | "idle">(() =>
   props.worldView === "alliance" ? props.worldRunStatus : props.selectedRun?.status ?? "idle",
 );
 const controlsActive = computed(() => controlStatus.value === "running" || controlStatus.value === "paused");
+const generationBlocked = computed(() => activeRun.value || props.worldRunStatus === "running" || props.worldRunStatus === "paused");
 const canStart = computed(() => {
   if (props.worldView === "alliance") return controlStatus.value === "idle" || controlStatus.value === "ended" || controlStatus.value === "failed";
   return (Boolean(props.selectedScenarioId) || (props.draft?.compile_status === "ready" && Boolean(props.draft.bundle)))
@@ -85,13 +85,11 @@ function start() {
   emit("start", parsed !== undefined && Number.isSafeInteger(parsed) ? parsed : undefined);
 }
 
-function generateTown() {
-  const population = Number(populationInput.value);
+function generateWorld() {
   const seedText = generationSeedInput.value.trim();
   const generationSeed = seedText === "" ? Math.floor(Math.random() * 9_007_199_254_740_991) : Number(seedText);
-  if (!Number.isSafeInteger(population) || population < 100 || population > 100_000) return;
   if (!Number.isSafeInteger(generationSeed) || generationSeed < 0) return;
-  emit("generate-town", { population, generationSeed, generationSize: generationSizeInput.value });
+  emit("generate-world", { generationSeed });
 }
 
 const PAGE_SIZE = 5;
@@ -171,32 +169,15 @@ function timeLabel(value: string): string {
     </section>
 
     <section class="rail-section rail-section--generation">
-      <div class="section-kicker"><MapPinned :size="14" aria-hidden="true" /> 生成城镇</div>
+      <div class="section-kicker"><MapPinned :size="14" aria-hidden="true" /> 生成世界</div>
       <div class="seed-row">
         <label class="field-label" for="generation-seed-input">世界种子</label>
-        <input id="generation-seed-input" v-model="generationSeedInput" class="text-field" inputmode="numeric" placeholder="随机生成" :disabled="activeRun || loading || generationLoading" />
+        <input id="generation-seed-input" v-model="generationSeedInput" class="text-field" inputmode="numeric" placeholder="随机生成" :disabled="generationBlocked || loading || generationLoading" />
       </div>
-      <div class="seed-row">
-        <label class="field-label" for="population-input">居民数量</label>
-        <input id="population-input" v-model="populationInput" class="text-field" type="number" min="100" max="100000" step="1" :disabled="activeRun || loading || generationLoading" />
-      </div>
-      <div class="seed-row">
-        <label class="field-label" for="generation-size-select">城镇规模</label>
-        <select id="generation-size-select" v-model="generationSizeInput" class="text-field" :disabled="activeRun || loading || generationLoading">
-          <option value="village">村庄</option>
-          <option value="town" selected>城镇</option>
-          <option value="city">主城</option>
-        </select>
-      </div>
-      <button class="action-button" type="button" :disabled="activeRun || loading || generationLoading" @click="generateTown">
+      <button class="action-button" type="button" :disabled="generationBlocked || loading || generationLoading" @click="generateWorld">
         <Play :size="15" aria-hidden="true" />
-        <span>{{ generationLoading ? "正在编译" : "生成城镇" }}</span>
+        <span>{{ generationLoading ? "正在生成" : "生成世界" }}</span>
       </button>
-      <div v-if="draft" class="scenario-meta">
-        <span>{{ draft.town_skeleton.buildings.length }} 座建筑</span>
-        <span>{{ draft.town_skeleton.streets.length }} 条街道</span>
-        <span>{{ draft.compile_status === "ready" ? "已就绪" : draft.compile_status === "failed" ? "失败" : "编译中" }}</span>
-      </div>
     </section>
     <section class="rail-section rail-section--layers">
       <div class="section-kicker"><Layers3 :size="14" aria-hidden="true" /> 地图图层</div>
@@ -270,23 +251,46 @@ function timeLabel(value: string): string {
         <p class="density-note">选择后将生成对应聚落，并跳转到其真实道路地图。</p>
       </template>
       <template v-else>
-      <label class="field-label" for="scenario-select">当前场景</label>
-      <select
-        id="scenario-select"
-        class="select-field"
-        :value="selectedScenarioId ?? ''"
-        :disabled="activeRun || loading"
-        @change="emit('select-scenario', ($event.target as HTMLSelectElement).value)"
-      >
-        <option value="" disabled>选择场景</option>
-        <option v-for="scenario in scenarios" :key="scenario.config.scenario_id" :value="scenario.config.scenario_id">
-          {{ scenario.config.name }}
-        </option>
-      </select>
-      <div v-if="selectedScenario" class="scenario-meta">
-        <span>{{ selectedScenario.config.locations.length }} 个地点</span>
-        <span>{{ selectedScenario.config.connections.length }} 条有向街道</span>
-      </div>
+        <label class="field-label" for="town-alliance-settlement-select">联盟聚落</label>
+        <select
+          id="town-alliance-settlement-select"
+          class="select-field"
+          :value="selectedAllianceId ?? ''"
+          :disabled="activeRun || loading || generationLoading"
+          @change="emit('select-alliance-settlement', ($event.target as HTMLSelectElement).value)"
+        >
+          <option value="" disabled>切换主城、城镇或村庄</option>
+          <optgroup label="主城">
+            <option v-for="settlement in allianceSettlements.filter((item) => item.kind === 'capital')" :key="settlement.id" :value="settlement.id">{{ settlement.name }}</option>
+          </optgroup>
+          <optgroup label="城镇">
+            <option v-for="settlement in allianceSettlements.filter((item) => item.kind === 'town')" :key="settlement.id" :value="settlement.id">{{ settlement.name }}</option>
+          </optgroup>
+          <optgroup label="村庄">
+            <option v-for="settlement in allianceSettlements.filter((item) => item.kind === 'village')" :key="settlement.id" :value="settlement.id">{{ settlement.name }}</option>
+          </optgroup>
+        </select>
+        <button class="action-button" type="button" :disabled="activeRun || loading || generationLoading" @click="emit('back-to-alliance')">
+          <MapPinned :size="15" aria-hidden="true" />
+          <span>返回世界地图</span>
+        </button>
+        <label class="field-label" for="scenario-select">当前场景</label>
+        <select
+          id="scenario-select"
+          class="select-field"
+          :value="selectedScenarioId ?? ''"
+          :disabled="activeRun || loading"
+          @change="emit('select-scenario', ($event.target as HTMLSelectElement).value)"
+        >
+          <option value="" disabled>选择场景</option>
+          <option v-for="scenario in scenarios" :key="scenario.config.scenario_id" :value="scenario.config.scenario_id">
+            {{ scenario.config.name }}
+          </option>
+        </select>
+        <div v-if="selectedScenario" class="scenario-meta">
+          <span>{{ selectedScenario.config.locations.length }} 个地点</span>
+          <span>{{ selectedScenario.config.connections.length }} 条有向街道</span>
+        </div>
       </template>
     </section>
 

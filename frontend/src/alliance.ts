@@ -112,6 +112,17 @@ function fitAllianceOffset(offset: Coordinate, bounds: AlliancePlacementBounds):
   );
 }
 
+function randomizeShape(template: Coordinate[], seed: number, key: string, jitter: number): Coordinate[] {
+  const driftX = (stableUnit(seed, `${key}:drift-x`) - 0.5) * jitter * 2;
+  const driftY = (stableUnit(seed, `${key}:drift-y`) - 0.5) * jitter * 2;
+  return template.map(([x, y], index) => {
+    const pointJitter = jitter * 0.45;
+    const nextX = x + driftX + (stableUnit(seed, `${key}:${index}:x`) - 0.5) * pointJitter;
+    const nextY = y + driftY + (stableUnit(seed, `${key}:${index}:y`) - 0.5) * pointJitter;
+    return point(Math.max(0, Math.min(BOUNDS[2], nextX)), Math.max(0, Math.min(BOUNDS[3], nextY)));
+  });
+}
+
 function pointInsidePolygon(candidate: Coordinate, polygon: Coordinate[]): boolean {
   let inside = false;
   for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
@@ -428,24 +439,41 @@ export function createAlliance(seed = 20260808): AllianceModel {
 
   const landmasses: Coordinate[][] = [
     territory,
-    [point(900, 140), point(1040, 90), point(1190, 150), point(1320, 80), point(1510, 150), point(1600, 360), point(1510, 520), point(1380, 500), point(1260, 600), point(1080, 530), point(950, 430)],
-    [point(720, 700), point(900, 650), point(1080, 700), point(1240, 640), point(1440, 760), point(1600, 700), point(1600, 1000), point(720, 1000)],
+    randomizeShape([
+      point(900, 140), point(1040, 90), point(1190, 150), point(1320, 80), point(1510, 150), point(1600, 360),
+      point(1510, 520), point(1380, 500), point(1260, 600), point(1080, 530), point(950, 430),
+    ], seed, "landmass-east", 52),
+    randomizeShape([
+      point(720, 700), point(900, 650), point(1080, 700), point(1240, 640), point(1440, 760), point(1600, 700),
+      point(1600, 1000), point(720, 1000),
+    ], seed, "landmass-south", 48),
   ];
   const mountains: Coordinate[][] = [
-    [point(930, 70), point(1050, 120), point(1130, 65), point(1240, 145), point(1370, 92), point(1510, 180), point(1450, 330), point(1260, 290), point(1110, 350), point(980, 260)],
-    [point(890, 820), point(1040, 700), point(1160, 770), point(1270, 680), point(1410, 760), point(1550, 710), point(1600, 980), point(1080, 980)],
-    [point(1350, 390), point(1440, 330), point(1580, 390), point(1510, 590), point(1390, 620), point(1300, 520)],
-    [point(70, 900), point(210, 850), point(330, 905), point(470, 860), point(620, 930), point(760, 890), point(840, 1000), point(40, 1000)],
+    randomizeShape([
+      point(930, 70), point(1050, 120), point(1130, 65), point(1240, 145), point(1370, 92), point(1510, 180),
+      point(1450, 330), point(1260, 290), point(1110, 350), point(980, 260),
+    ], seed, "mountains-north", 38),
+    randomizeShape([
+      point(890, 820), point(1040, 700), point(1160, 770), point(1270, 680), point(1410, 760), point(1550, 710),
+      point(1600, 980), point(1080, 980),
+    ], seed, "mountains-south", 42),
+    randomizeShape([
+      point(1350, 390), point(1440, 330), point(1580, 390), point(1510, 590), point(1390, 620), point(1300, 520),
+    ], seed, "mountains-east", 34),
+    randomizeShape([
+      point(70, 900), point(210, 850), point(330, 905), point(470, 860), point(620, 930), point(760, 890),
+      point(840, 1000), point(40, 1000),
+    ], seed, "mountains-west", 30),
   ];
   const rivers: Coordinate[][] = [
-    [point(930, 0), point(1020, 180), point(1110, 310), point(1080, 470), point(1180, 620), point(1110, 810), point(1230, 1000)],
-    [point(1570, 0), point(1480, 160), point(1510, 300), point(1430, 450), point(1470, 650), point(1400, 820), point(1510, 1000)],
-    [point(930, 570), point(1040, 560), point(1170, 650), point(1300, 630), point(1460, 700)],
+    randomizeShape([point(930, 0), point(1020, 180), point(1110, 310), point(1080, 470), point(1180, 620), point(1110, 810), point(1230, 1000)], seed, "river-one", 26),
+    randomizeShape([point(1570, 0), point(1480, 160), point(1510, 300), point(1430, 450), point(1470, 650), point(1400, 820), point(1510, 1000)], seed, "river-two", 24),
+    randomizeShape([point(930, 570), point(1040, 560), point(1170, 650), point(1300, 630), point(1460, 700)], seed, "river-three", 32),
   ];
   const lakes: Coordinate[][] = [
-    [point(1010, 390), point(1110, 350), point(1200, 390), point(1225, 475), point(1160, 535), point(1050, 505), point(990, 450)],
-    [point(1330, 170), point(1410, 130), point(1490, 175), point(1510, 250), point(1450, 300), point(1360, 275)],
-    [point(960, 720), point(1040, 680), point(1120, 715), point(1135, 790), point(1060, 825), point(980, 790)],
+    randomizeShape([point(1010, 390), point(1110, 350), point(1200, 390), point(1225, 475), point(1160, 535), point(1050, 505), point(990, 450)], seed, "lake-one", 28),
+    randomizeShape([point(1330, 170), point(1410, 130), point(1490, 175), point(1510, 250), point(1450, 300), point(1360, 275)], seed, "lake-two", 24),
+    randomizeShape([point(960, 720), point(1040, 680), point(1120, 715), point(1135, 790), point(1060, 825), point(980, 790)], seed, "lake-three", 25),
   ];
   const bands: AllianceTerrainBand[] = [
     { id: "polar-north", label: "北极圈", y0: 0, y1: 135, kind: "polar" },

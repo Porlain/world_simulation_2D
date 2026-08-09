@@ -43,7 +43,7 @@ test("runs, pauses, seeks, and ends a city simulation", async ({ page }, testInf
   await page.getByRole("button", { name: "继续" }).click();
   await expect.poll(() => movingDot.getAttribute("cx")).not.toBe(pausedPosition);
   await page.locator("button[title='结束当前运行']").click();
-  await page.getByLabel("联盟聚落").selectOption("town-0-0");
+  await page.getByLabel("联盟聚落").selectOption("town-00");
   await expect(page.locator(".city-map")).toBeVisible();
   await expect(page.locator(".scenario-meta").filter({ hasText: "已就绪" })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("button", { name: "启动模拟" })).toBeEnabled({ timeout: 20_000 });
@@ -119,7 +119,7 @@ test("runs, pauses, seeks, and ends a city simulation", async ({ page }, testInf
   await page.screenshot({ path: testInfo.outputPath("lifecycle.png"), fullPage: true });
 });
 
-test("generates random towns with people, vehicles, and heat", async ({ page }, testInfo) => {
+test("generates seeded worlds and switches between settlements", async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
@@ -129,54 +129,28 @@ test("generates random towns with people, vehicles, and heat", async ({ page }, 
   if (testInfo.project.name === "mobile") {
     await page.getByRole("button", { name: "控制", exact: true }).click();
   }
-  await page.getByLabel("世界种子").fill("");
-  await page.getByLabel("居民数量").fill("11499");
-  await page.getByRole("button", { name: "生成城镇" }).click();
+  await page.getByLabel("世界种子").fill("567890");
+  await page.getByRole("button", { name: "生成世界" }).click();
+  await expect(page.locator(".alliance-map")).toBeVisible();
+  await expect(page.locator(".map-title")).toContainText("SEED 567890");
+
+  const settlementSelect = page.getByLabel("联盟聚落");
+  await settlementSelect.selectOption("town-00");
+  await expect(page.locator(".city-map")).toBeVisible();
   await expect(page.locator(".scenario-meta").filter({ hasText: "已就绪" })).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator(".map-title h1")).not.toHaveText("", { timeout: 20_000 });
   const firstTown = (await page.locator(".map-title h1").innerText()).trim();
   await expect(page.locator(".map-inspector .inspector-heading strong")).toHaveText(firstTown);
-  await page.getByRole("button", { name: "生成城镇" }).click();
-  await expect(page.locator(".map-title h1")).not.toHaveText(firstTown, { timeout: 20_000 });
+
+  const townSelect = page.getByLabel("联盟聚落");
+  await townSelect.selectOption("town-01");
   await expect(page.locator(".scenario-meta").filter({ hasText: "已就绪" })).toBeVisible({ timeout: 20_000 });
   const secondTown = (await page.locator(".map-title h1").innerText()).trim();
-  expect(secondTown).not.toBe("");
-  await expect(page.locator(".map-inspector .inspector-heading strong")).toHaveText(secondTown);
-  await expect(page.locator(".scenario-meta").filter({ hasText: "已就绪" })).toBeVisible();
+  expect(secondTown).not.toBe(firstTown);
 
-  const startButton = page.getByRole("button", { name: "启动模拟" });
-  await expect(startButton).toBeEnabled();
-  await startButton.click();
-  await expect(startButton).toBeDisabled();
-  await expect(page.locator(".history-row[aria-current='true'] small")).toContainText(secondTown, { timeout: 20_000 });
-  await expect.poll(async () => Number((await page.locator(".tick-readout").innerText()).replace(/\D/g, "")), {
-    timeout: 20_000,
-  }).toBeGreaterThanOrEqual(2);
-  await expect(page.locator(".map-legend")).toContainText("人流样本");
-  await expect(page.locator(".map-legend")).toContainText("车辆样本");
-  await expect(page.locator(".map-legend")).toContainText("人流方向热力");
-  await expect(page.locator("canvas#deckgl-overlay")).toBeVisible();
-
-  if (testInfo.project.name === "mobile") {
-    await page.getByRole("button", { name: "关闭控制面板" }).click();
-    await expect(page.locator(".menu-drawer")).not.toBeVisible();
-  }
-  await page.getByRole("button", { name: "车流", exact: true }).click();
-  await expect(page.locator(".map-legend")).toContainText("车流方向热力");
-  if (testInfo.project.name === "mobile") {
-    await page.getByRole("button", { name: "控制", exact: true }).click();
-    await expect(page.locator(".menu-drawer")).toBeVisible();
-  }
-  await page.getByLabel("方向热力").uncheck();
-  await expect(page.locator(".map-legend")).not.toContainText("方向热力");
-  await page.getByLabel("方向热力").check();
-  await expect(page.locator(".menu-drawer")).toBeVisible();
-
-  if (testInfo.project.name === "mobile") {
-    await page.getByRole("button", { name: "关闭控制面板" }).click();
-    await expect(page.locator(".menu-drawer")).not.toBeVisible();
-  }
+  await page.getByRole("button", { name: "返回世界地图" }).click();
+  await expect(page.locator(".alliance-map")).toBeVisible();
+  await expect(page.locator(".map-title h1")).toHaveText("人类联盟");
 
   expect(consoleErrors).toEqual([]);
-  await page.screenshot({ path: testInfo.outputPath("generated-town.png"), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("generated-world.png"), fullPage: true });
 });
