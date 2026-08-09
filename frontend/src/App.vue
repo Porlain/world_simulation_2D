@@ -910,6 +910,7 @@ onUnmounted(() => {
             <div><dt>登记人口</dt><dd>{{ formatNumber(focusedAllianceSettlement.population) }}</dd></div>
             <div><dt>上级聚落</dt><dd>{{ focusedAllianceParent?.name ?? "联盟直辖" }}</dd></div>
             <div><dt>下辖聚落</dt><dd>{{ focusedAllianceSettlement.children.length }} 个</dd></div>
+            <div v-if="focusedAllianceSettlement.kind === 'capital' && focusedAllianceSettlement.influenceRadius"><dt>辐射半径</dt><dd>{{ Math.round(focusedAllianceSettlement.influenceRadius) }} 地图单位</dd></div>
           </dl>
           <button class="action-button action-button--primary alliance-enter-button" type="button" :disabled="generationLoading || activeRun" @click="enterAllianceSettlement()">
             进入聚落地图

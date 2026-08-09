@@ -8,10 +8,10 @@ test("alliance generation is deterministic and keeps its settlement hierarchy", 
   const second = createAlliance(1234);
 
   assert.deepEqual(first, second);
-  assert.equal(first.settlements.filter((item) => item.kind === "capital").length, 3);
-  assert.equal(first.settlements.filter((item) => item.kind === "town").length, 9);
-  assert.equal(first.settlements.filter((item) => item.kind === "village").length, 18);
-  assert.equal(first.roads.length, 30);
+  assert.equal(first.settlements.filter((item) => item.kind === "capital").length, 5);
+  assert.equal(first.settlements.filter((item) => item.kind === "town").length, 23);
+  assert.equal(first.settlements.filter((item) => item.kind === "village").length, 69);
+  assert.equal(first.roads.length, 97);
   assert.ok(first.mountains.length >= 3);
   assert.ok(first.rivers.length >= 3);
   assert.ok(first.lakes.length >= 3);
@@ -21,6 +21,32 @@ test("alliance generation is deterministic and keeps its settlement hierarchy", 
   for (const settlement of first.settlements.filter((item) => item.parentId)) {
     assert.ok(byId.get(settlement.parentId));
     assert.ok(byId.get(settlement.parentId).children.includes(settlement.id));
+  }
+
+  const capitals = first.settlements.filter((item) => item.kind === "capital");
+  assert.ok(capitals.every((capital) => (capital.influenceRadius ?? 0) >= 120));
+  assert.ok(capitals.every((capital) => capital.children.length >= 4));
+  assert.equal(first.settlements.filter((item) => item.boundaryAnchor).length, 7);
+  const findCapital = (settlement) => {
+    let current = settlement;
+    while (current.parentId) current = byId.get(current.parentId);
+    return current;
+  };
+  for (const settlement of first.settlements.filter((item) => item.kind !== "capital")) {
+    const capital = findCapital(settlement);
+    assert.ok(
+      Math.hypot(settlement.position[0] - capital.position[0], settlement.position[1] - capital.position[1]) <= (capital.influenceRadius ?? 0),
+      `${settlement.name} falls outside ${capital.name} influence range`,
+    );
+  }
+  for (const corner of first.territory) {
+    const nearestBoundaryTown = first.settlements
+      .filter((item) => item.kind === "town" && item.boundaryAnchor)
+      .reduce(
+        (distance, town) => Math.min(distance, Math.hypot(town.position[0] - corner[0], town.position[1] - corner[1])),
+        Infinity,
+      );
+    assert.ok(nearestBoundaryTown <= 85, `no boundary town near ${corner}`);
   }
 });
 

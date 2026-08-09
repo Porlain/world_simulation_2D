@@ -85,6 +85,9 @@ onUnmounted(() => {
         <clipPath id="alliance-land-clip">
           <polygon v-for="(landmass, index) in alliance.landmasses" :key="`land-clip-${index}`" :points="alliancePolygon(landmass)" />
         </clipPath>
+        <clipPath id="alliance-territory-clip">
+          <polygon :points="alliancePolygon(alliance.territory)" />
+        </clipPath>
       </defs>
       <rect x="0" y="0" width="1600" height="1000" class="alliance-map__ground" />
       <image x="0" y="0" width="1600" height="1000" href="/assets/ocean-texture.jpg" preserveAspectRatio="xMidYMid slice" class="alliance-ocean-texture" aria-hidden="true" />
@@ -104,6 +107,17 @@ onUnmounted(() => {
         <text v-for="band in alliance.bands" :key="`${band.id}-label`" x="34" :y="(band.y0 + band.y1) / 2" class="alliance-band-label">{{ band.label }}</text>
         <path d="M0 500 L1600 500" class="alliance-equator" />
         <text x="1320" y="492" class="alliance-equator-label">赤道</text>
+      </g>
+
+      <g class="alliance-influence-ranges" aria-label="主城辐射范围" clip-path="url(#alliance-territory-clip)">
+        <circle
+          v-for="(capital, index) in alliance.settlements.filter((item) => item.kind === 'capital')"
+          :key="`${capital.id}-influence`"
+          :cx="capital.position[0]"
+          :cy="capital.position[1]"
+          :r="capital.influenceRadius ?? 140"
+          :class="`alliance-influence alliance-influence--${index}`"
+        />
       </g>
 
       <g class="alliance-mountains" aria-label="山脉">
@@ -140,6 +154,7 @@ onUnmounted(() => {
       <span><i class="alliance-legend-line alliance-legend-line--river"></i>河流</span>
       <span><i class="alliance-legend-swatch alliance-legend-swatch--lake"></i>湖泊</span>
       <span><i class="alliance-legend-line alliance-legend-line--road"></i>联盟道路</span>
+      <span><i class="alliance-legend-line alliance-legend-line--influence"></i>主城辐射范围</span>
     </div>
   </div>
 </template>
@@ -177,6 +192,12 @@ onUnmounted(() => {
 .alliance-equator-label { fill: #efd789; font: 700 14px "Noto Sans SC Variable", sans-serif; }
 .alliance-territory__fill { fill: #c5a854; fill-opacity: 0.12; stroke: #d9bb66; stroke-width: 3; stroke-dasharray: 12 10; }
 .alliance-territory__label { fill: #f1d58a; font: 700 19px "Noto Sans SC Variable", sans-serif; letter-spacing: 1px; paint-order: stroke; stroke: #173235; stroke-width: 6px; }
+.alliance-influence { stroke-width: 2.5; stroke-dasharray: 12 10; opacity: 0.9; }
+.alliance-influence--0 { fill: #c8a34e; fill-opacity: 0.08; stroke: #e7c86d; }
+.alliance-influence--1 { fill: #6fb5a0; fill-opacity: 0.07; stroke: #9bd4bc; }
+.alliance-influence--2 { fill: #8a9bc2; fill-opacity: 0.07; stroke: #b6c7e5; }
+.alliance-influence--3 { fill: #c97e69; fill-opacity: 0.07; stroke: #e1a28c; }
+.alliance-influence--4 { fill: #9c8bc5; fill-opacity: 0.07; stroke: #c5b4e2; }
 
 .alliance-mountain { fill: url("#alliance-mountain-hatch"); stroke: #8eaa92; stroke-width: 2; opacity: 0.9; }
 .alliance-mountain-hatch__ground { fill: #314b47; }
@@ -222,6 +243,7 @@ onUnmounted(() => {
 .alliance-legend-swatch--lake { background: #2e7e8a; border-color: #8fd1d0; }
 .alliance-legend-line { width: 20px; height: 3px; background: #73c4cd; }
 .alliance-legend-line--road { background: #e0bc70; }
+.alliance-legend-line--influence { height: 0; border-top: 2px dashed #e7c86d; background: transparent; }
 
 @media (max-width: 899px) {
   .alliance-map { inset: 0; }
