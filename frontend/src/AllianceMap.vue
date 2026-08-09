@@ -73,6 +73,30 @@ const detailLevel = computed<"world" | "regions" | "settlements">(() => {
   if (zoomFactor.value < 2.35) return "regions";
   return "settlements";
 });
+const visibleSettlementLabelIds = computed(() => {
+  const visible = new Set<string>();
+  const accepted: Array<{ position: Coordinate; minX: number; minY: number }> = [];
+  const candidates = props.alliance.settlements.filter((settlement) => {
+    if (!shouldShowSettlement(settlement)) return false;
+    if (settlement.kind === "village") return detailLevel.value === "settlements" && zoomFactor.value >= 2.8;
+    return true;
+  }).sort((left, right) => {
+    const priority = { capital: 0, town: 1, village: 2 } as const;
+    return priority[left.kind] - priority[right.kind];
+  });
+  for (const settlement of candidates) {
+    const minX = settlement.kind === "capital" ? 0 : settlement.kind === "town" ? 74 : 56;
+    const minY = settlement.kind === "capital" ? 0 : 22;
+    const crowded = accepted.some((item) =>
+      Math.abs(item.position[0] - settlement.position[0]) < Math.max(item.minX, minX)
+      && Math.abs(item.position[1] - settlement.position[1]) < Math.max(item.minY, minY),
+    );
+    if (crowded) continue;
+    visible.add(settlement.id);
+    accepted.push({ position: settlement.position, minX, minY });
+  }
+  return visible;
+});
 const territoryLabelPosition = computed(() => [
   Math.min(...props.alliance.territory.map(([x]) => x)) + 4,
   Math.max(36, Math.min(...props.alliance.territory.map(([, y]) => y)) - 18),
@@ -285,9 +309,7 @@ function settlementClass(settlement: AllianceSettlement): string {
 }
 
 function shouldShowSettlementLabel(settlement: AllianceSettlement): boolean {
-  if (settlement.kind === "capital") return true;
-  if (settlement.kind === "town") return detailLevel.value === "settlements";
-  return detailLevel.value === "settlements" && zoomFactor.value >= 2.8;
+  return visibleSettlementLabelIds.value.has(settlement.id);
 }
 
 function shouldShowSettlement(settlement: AllianceSettlement): boolean {
@@ -310,7 +332,7 @@ onMounted(() => {
       const [x, y, width, height] = compactViewBox.value.split(" ").map(Number);
       viewCenter.value = [x + width / 2, y + height / 2];
     } else {
-      viewCenter.value = [800, 500];
+      viewCenter.value = worldCenter.value;
     }
   };
   updateViewport();
@@ -475,7 +497,7 @@ onUnmounted(() => {
       <g v-if="detailLevel !== 'world'" class="alliance-regions" aria-label="联盟行政区域" clip-path="url(#alliance-territory-clip)">
         <g v-for="region in alliance.regions" :key="region.id">
           <polygon :points="alliancePolygon(region.polygon)" :class="['alliance-region', `alliance-region--${region.colorIndex}`]" />
-          <text v-if="detailLevel === 'regions' || detailLevel === 'settlements'" :x="regionLabelPosition(region)[0]" :y="regionLabelPosition(region)[1]" class="alliance-region__label">{{ region.name }}</text>
+          <text v-if="detailLevel === 'regions'" :x="regionLabelPosition(region)[0]" :y="regionLabelPosition(region)[1]" class="alliance-region__label">{{ region.name }}</text>
         </g>
       </g>
 
