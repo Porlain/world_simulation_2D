@@ -3,6 +3,26 @@ import test from "node:test";
 
 import { allianceFlowPoint, createAlliance } from "../src/alliance.ts";
 
+function pointInsidePolygon(point, polygon) {
+  let inside = false;
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
+    const current = polygon[index];
+    const prior = polygon[previous];
+    if ((current[1] > point[1]) !== (prior[1] > point[1])) {
+      const edgeX = (prior[0] - current[0]) * (point[1] - current[1])
+        / (prior[1] - current[1]) + current[0];
+      if (point[0] < edgeX) inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function boundingArea(polygon) {
+  const xs = polygon.map(([x]) => x);
+  const ys = polygon.map(([, y]) => y);
+  return (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+}
+
 test("alliance generation is deterministic and keeps its settlement hierarchy", () => {
   const first = createAlliance(1234);
   const second = createAlliance(1234);
@@ -60,6 +80,23 @@ test("alliance generation is deterministic and keeps its settlement hierarchy", 
   const ys = first.territory.map(([, y]) => y);
   assert.ok(Math.max(...xs) - Math.min(...xs) <= 760);
   assert.ok(Math.max(...ys) - Math.min(...ys) <= 600);
+});
+
+test("the alliance occupies a seeded subsection of one host continent", () => {
+  const hostIndexes = new Set();
+  for (const seed of [2, 3, 1234, 5678, 20260808]) {
+    const alliance = createAlliance(seed);
+    const hostIndex = alliance.landmasses.findIndex((landmass) =>
+      alliance.territory.every((item) => pointInsidePolygon(item, landmass)),
+    );
+    assert.ok(hostIndex >= 0, `seed ${seed} has no continent containing the alliance`);
+    assert.ok(
+      boundingArea(alliance.territory) / boundingArea(alliance.landmasses[hostIndex]) < 0.28,
+      `seed ${seed} makes the alliance too large for its host continent`,
+    );
+    hostIndexes.add(hostIndex);
+  }
+  assert.ok(hostIndexes.size >= 3, "the host continent should vary with the world seed");
 });
 
 test("alliance roads meet only at declared settlements", () => {

@@ -284,8 +284,13 @@ const terrainPatches = computed<TerrainPatch[]>(() => {
 });
 
 function landmassVariant(index: number): number {
-  const seedOffset = Math.floor(terrainUnit(props.alliance.seed, "landmass-texture-offset") * 4);
-  return (index + seedOffset) % 4;
+  const landmass = props.alliance.landmasses[index];
+  const bounds = terrainBounds(landmass);
+  const latitude = (bounds.y0 + bounds.y1) / 2;
+  const variant = terrainUnit(props.alliance.seed, `landmass-texture-${index}`);
+  if (latitude < 420 || latitude > 1580) return variant < 0.55 ? 0 : 3;
+  if (latitude < 650 || latitude > 1180) return variant < 0.45 ? 0 : variant < 0.78 ? 2 : 3;
+  return variant < 0.2 ? 0 : variant < 0.48 ? 1 : variant < 0.8 ? 2 : 3;
 }
 
 function settlementRadius(settlement: AllianceSettlement): number {
@@ -394,70 +399,72 @@ onUnmounted(() => {
           <path d="M13 15 l10 8 -13 5 z M58 71 l12 6 -11 6 z" class="alliance-land-texture__rock-facet" />
         </pattern>
         <linearGradient id="alliance-climate-gradient" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="oklch(0.84 0.045 185)" stop-opacity="0.84" />
-          <stop offset="0.09" stop-color="oklch(0.68 0.065 163)" stop-opacity="0.56" />
-          <stop offset="0.22" stop-color="oklch(0.5 0.095 145)" stop-opacity="0.4" />
-          <stop offset="0.37" stop-color="oklch(0.62 0.095 122)" stop-opacity="0.46" />
-          <stop offset="0.49" stop-color="oklch(0.66 0.1 82)" stop-opacity="0.56" />
-          <stop offset="0.61" stop-color="oklch(0.54 0.115 124)" stop-opacity="0.52" />
-          <stop offset="0.76" stop-color="oklch(0.61 0.09 118)" stop-opacity="0.42" />
-          <stop offset="0.9" stop-color="oklch(0.69 0.06 160)" stop-opacity="0.54" />
-          <stop offset="1" stop-color="oklch(0.84 0.045 185)" stop-opacity="0.84" />
+          <stop offset="0" stop-color="#d5e7eb" stop-opacity="0.82" />
+          <stop offset="0.07" stop-color="#96784b" stop-opacity="0.52" />
+          <stop offset="0.16" stop-color="#4b6b32" stop-opacity="0.38" />
+          <stop offset="0.28" stop-color="#409c43" stop-opacity="0.42" />
+          <stop offset="0.40" stop-color="#c8d68f" stop-opacity="0.48" />
+          <stop offset="0.50" stop-color="#d2d082" stop-opacity="0.52" />
+          <stop offset="0.60" stop-color="#c8d68f" stop-opacity="0.48" />
+          <stop offset="0.72" stop-color="#29bc56" stop-opacity="0.42" />
+          <stop offset="0.84" stop-color="#4b6b32" stop-opacity="0.38" />
+          <stop offset="0.93" stop-color="#96784b" stop-opacity="0.52" />
+          <stop offset="1" stop-color="#d5e7eb" stop-opacity="0.82" />
         </linearGradient>
         <radialGradient id="alliance-ice-gradient">
-          <stop offset="0" stop-color="oklch(0.92 0.025 186)" stop-opacity="0.76" />
-          <stop offset="0.55" stop-color="oklch(0.79 0.05 182)" stop-opacity="0.3" />
-          <stop offset="1" stop-color="oklch(0.79 0.05 182)" stop-opacity="0" />
+          <stop offset="0" stop-color="#d5e7eb" stop-opacity="0.74" />
+          <stop offset="0.55" stop-color="#cdd4e7" stop-opacity="0.28" />
+          <stop offset="1" stop-color="#cdd4e7" stop-opacity="0" />
         </radialGradient>
         <radialGradient id="alliance-tundra-gradient">
-          <stop offset="0" stop-color="oklch(0.7 0.07 155)" stop-opacity="0.66" />
-          <stop offset="0.64" stop-color="oklch(0.62 0.065 151)" stop-opacity="0.22" />
-          <stop offset="1" stop-color="oklch(0.62 0.065 151)" stop-opacity="0" />
+          <stop offset="0" stop-color="#96784b" stop-opacity="0.64" />
+          <stop offset="0.64" stop-color="#96784b" stop-opacity="0.2" />
+          <stop offset="1" stop-color="#96784b" stop-opacity="0" />
         </radialGradient>
         <radialGradient id="alliance-taiga-gradient">
-          <stop offset="0" stop-color="oklch(0.42 0.1 145)" stop-opacity="0.58" />
-          <stop offset="0.7" stop-color="oklch(0.44 0.09 145)" stop-opacity="0.18" />
-          <stop offset="1" stop-color="oklch(0.44 0.09 145)" stop-opacity="0" />
+          <stop offset="0" stop-color="#4b6b32" stop-opacity="0.56" />
+          <stop offset="0.7" stop-color="#4b6b32" stop-opacity="0.16" />
+          <stop offset="1" stop-color="#4b6b32" stop-opacity="0" />
         </radialGradient>
         <radialGradient id="alliance-forest-gradient">
-          <stop offset="0" stop-color="oklch(0.44 0.12 137)" stop-opacity="0.58" />
-          <stop offset="0.68" stop-color="oklch(0.5 0.1 132)" stop-opacity="0.18" />
-          <stop offset="1" stop-color="oklch(0.5 0.1 132)" stop-opacity="0" />
+          <stop offset="0" stop-color="#29bc56" stop-opacity="0.56" />
+          <stop offset="0.68" stop-color="#29bc56" stop-opacity="0.16" />
+          <stop offset="1" stop-color="#29bc56" stop-opacity="0" />
         </radialGradient>
         <radialGradient id="alliance-meadow-gradient">
-          <stop offset="0" stop-color="oklch(0.65 0.1 119)" stop-opacity="0.58" />
-          <stop offset="0.7" stop-color="oklch(0.64 0.08 119)" stop-opacity="0.19" />
-          <stop offset="1" stop-color="oklch(0.64 0.08 119)" stop-opacity="0" />
+          <stop offset="0" stop-color="#c8d68f" stop-opacity="0.56" />
+          <stop offset="0.7" stop-color="#c8d68f" stop-opacity="0.17" />
+          <stop offset="1" stop-color="#c8d68f" stop-opacity="0" />
         </radialGradient>
         <radialGradient id="alliance-steppe-gradient">
-          <stop offset="0" stop-color="oklch(0.7 0.11 81)" stop-opacity="0.62" />
-          <stop offset="0.64" stop-color="oklch(0.67 0.08 82)" stop-opacity="0.24" />
-          <stop offset="1" stop-color="oklch(0.67 0.08 82)" stop-opacity="0" />
+          <stop offset="0" stop-color="#d2d082" stop-opacity="0.6" />
+          <stop offset="0.64" stop-color="#d2d082" stop-opacity="0.22" />
+          <stop offset="1" stop-color="#d2d082" stop-opacity="0" />
         </radialGradient>
         <radialGradient id="alliance-desert-gradient">
-          <stop offset="0" stop-color="oklch(0.73 0.12 74)" stop-opacity="0.78" />
-          <stop offset="0.54" stop-color="oklch(0.68 0.1 73)" stop-opacity="0.38" />
-          <stop offset="1" stop-color="oklch(0.68 0.1 73)" stop-opacity="0" />
+          <stop offset="0" stop-color="#fbe79f" stop-opacity="0.76" />
+          <stop offset="0.54" stop-color="#fbe79f" stop-opacity="0.36" />
+          <stop offset="1" stop-color="#fbe79f" stop-opacity="0" />
         </radialGradient>
         <radialGradient id="alliance-savanna-gradient">
-          <stop offset="0" stop-color="oklch(0.63 0.11 105)" stop-opacity="0.62" />
-          <stop offset="0.68" stop-color="oklch(0.61 0.08 105)" stop-opacity="0.2" />
-          <stop offset="1" stop-color="oklch(0.61 0.08 105)" stop-opacity="0" />
+          <stop offset="0" stop-color="#b6d95d" stop-opacity="0.6" />
+          <stop offset="0.68" stop-color="#b6d95d" stop-opacity="0.18" />
+          <stop offset="1" stop-color="#b6d95d" stop-opacity="0" />
         </radialGradient>
         <radialGradient id="alliance-rainforest-gradient">
-          <stop offset="0" stop-color="oklch(0.4 0.14 145)" stop-opacity="0.7" />
-          <stop offset="0.64" stop-color="oklch(0.45 0.11 143)" stop-opacity="0.24" />
-          <stop offset="1" stop-color="oklch(0.45 0.11 143)" stop-opacity="0" />
+          <stop offset="0" stop-color="#7dcb35" stop-opacity="0.68" />
+          <stop offset="0.64" stop-color="#7dcb35" stop-opacity="0.22" />
+          <stop offset="1" stop-color="#7dcb35" stop-opacity="0" />
         </radialGradient>
         <radialGradient id="alliance-wetland-gradient">
-          <stop offset="0" stop-color="oklch(0.49 0.1 174)" stop-opacity="0.54" />
-          <stop offset="0.66" stop-color="oklch(0.52 0.08 171)" stop-opacity="0.18" />
-          <stop offset="1" stop-color="oklch(0.52 0.08 171)" stop-opacity="0" />
+          <stop offset="0" stop-color="#0b9131" stop-opacity="0.52" />
+          <stop offset="0.66" stop-color="#0b9131" stop-opacity="0.16" />
+          <stop offset="1" stop-color="#0b9131" stop-opacity="0" />
         </radialGradient>
         <radialGradient id="alliance-rock-gradient">
-          <stop offset="0" stop-color="oklch(0.5 0.045 92)" stop-opacity="0.62" />
-          <stop offset="0.64" stop-color="oklch(0.48 0.04 93)" stop-opacity="0.2" />
-          <stop offset="1" stop-color="oklch(0.48 0.04 93)" stop-opacity="0" />
+          <stop offset="0" stop-color="#b5b887" stop-opacity="0.6" />
+          <stop offset="0.64" stop-color="#b5b887" stop-opacity="0.18" />
+          <stop offset="1" stop-color="#b5b887" stop-opacity="0" />
         </radialGradient>
         <filter id="alliance-terrain-noise" x="-10%" y="-10%" width="120%" height="120%">
           <feTurbulence type="fractalNoise" baseFrequency="0.012 0.026" numOctaves="3" seed="17" />
@@ -507,13 +514,13 @@ onUnmounted(() => {
         <text :x="equatorLabelPosition[0]" :y="equatorLabelPosition[1]" class="alliance-equator-label">赤道</text>
       </g>
 
-      <g class="alliance-mountains" aria-label="山脉">
-        <polygon v-for="(mountain, index) in alliance.mountains" :key="`mountain-${index}`" :points="alliancePolygon(mountain)" class="alliance-mountain" />
+      <g class="alliance-mountains" clip-path="url(#alliance-land-clip)" aria-label="山脉">
+        <path v-for="(mountain, index) in alliance.mountains" :key="`mountain-${index}`" :d="alliancePath(mountain)" class="alliance-mountain" />
       </g>
-      <g class="alliance-rivers" aria-label="河流">
+      <g class="alliance-rivers" clip-path="url(#alliance-land-clip)" aria-label="河流">
         <path v-for="(river, index) in alliance.rivers" :key="`river-${index}`" :d="alliancePath(river)" class="alliance-river" />
       </g>
-      <g class="alliance-lakes" aria-label="湖泊">
+      <g class="alliance-lakes" clip-path="url(#alliance-land-clip)" aria-label="湖泊">
         <polygon v-for="(lake, index) in alliance.lakes" :key="`lake-${index}`" :points="alliancePolygon(lake)" class="alliance-lake" />
       </g>
 
@@ -564,17 +571,17 @@ onUnmounted(() => {
   position: absolute;
   inset: 0 calc(var(--inspector-width) + var(--resizer-size)) 0 calc(var(--rail-width) + var(--resizer-size));
   overflow: hidden;
-  --terrain-ocean: oklch(0.27 0.055 215);
-  --terrain-land: oklch(0.46 0.08 137);
-  --terrain-edge: oklch(0.72 0.07 125);
-  --terrain-ink: oklch(0.9 0.035 150);
+  --terrain-ocean: #466eab;
+  --terrain-land: #eef6fb;
+  --terrain-edge: #b0c4d8;
+  --terrain-ink: #3e3e4b;
   background: var(--terrain-ocean);
 }
 .alliance-map--pearl {
-  --terrain-ocean: oklch(0.74 0.09 239);
-  --terrain-land: oklch(0.78 0.085 128);
-  --terrain-edge: oklch(0.47 0.055 132);
-  --terrain-ink: oklch(0.26 0.045 245);
+  --terrain-ocean: #5b8cc9;
+  --terrain-land: #f5f0e8;
+  --terrain-edge: #8a9fb5;
+  --terrain-ink: #2e2e38;
 }
 
 .alliance-map__svg {
@@ -629,36 +636,36 @@ onUnmounted(() => {
 .alliance-map__ground { fill: var(--terrain-ocean); }
 .alliance-ocean-texture { opacity: 0.16; mix-blend-mode: screen; filter: saturate(0.72) contrast(0.88); }
 .alliance-map__grid { fill: url("#alliance-grid"); opacity: 0.24; }
-.alliance-grid-line { stroke: oklch(0.75 0.055 155); stroke-width: 1; opacity: 0.14; }
+.alliance-grid-line { stroke: #a6c1fd; stroke-width: 1; opacity: 0.12; }
 .alliance-landmass { stroke: var(--terrain-edge); stroke-width: 2.2; opacity: 0.94; }
 .alliance-landmass--variant-0 { fill: url("#alliance-land-texture"); }
 .alliance-landmass--variant-1 { fill: url("#alliance-land-texture-dry"); }
 .alliance-landmass--variant-2 { fill: url("#alliance-land-texture-forest"); }
 .alliance-landmass--variant-3 { fill: url("#alliance-land-texture-rock"); }
 .alliance-land-texture__ground { fill: var(--terrain-land); }
-.alliance-land-texture__grain { fill: none; stroke: oklch(0.67 0.07 135); stroke-width: 1; opacity: 0.28; }
-.alliance-land-texture__speck { fill: oklch(0.8 0.08 112); opacity: 0.36; }
-.alliance-land-texture__dry-ground { fill: oklch(0.58 0.09 90); }
-.alliance-land-texture__dry-ridge { fill: none; stroke: oklch(0.72 0.08 84); stroke-width: 1.2; opacity: 0.42; }
-.alliance-land-texture__dry-speck { fill: none; stroke: oklch(0.8 0.08 76); stroke-width: 2; opacity: 0.42; }
-.alliance-land-texture__forest-ground { fill: oklch(0.43 0.1 141); }
-.alliance-land-texture__forest-grain { fill: none; stroke: oklch(0.62 0.1 134); stroke-width: 1.1; opacity: 0.36; }
-.alliance-land-texture__canopy { fill: oklch(0.35 0.11 143); opacity: 0.55; }
-.alliance-land-texture__canopy-small { fill: oklch(0.7 0.09 125); opacity: 0.5; }
-.alliance-land-texture__rock-ground { fill: oklch(0.43 0.05 105); }
-.alliance-land-texture__rock-ridge { fill: none; stroke: oklch(0.63 0.05 100); stroke-width: 1.6; opacity: 0.42; }
-.alliance-land-texture__rock-facet { fill: oklch(0.7 0.05 94); opacity: 0.34; }
-.alliance-map--pearl .alliance-land-texture__dry-ground { fill: oklch(0.84 0.1 87); }
-.alliance-map--pearl .alliance-land-texture__dry-ridge { stroke: oklch(0.63 0.08 83); }
-.alliance-map--pearl .alliance-land-texture__forest-ground { fill: oklch(0.62 0.1 141); }
-.alliance-map--pearl .alliance-land-texture__forest-grain { stroke: oklch(0.42 0.1 138); }
-.alliance-map--pearl .alliance-land-texture__canopy { fill: oklch(0.48 0.11 143); }
-.alliance-map--pearl .alliance-land-texture__rock-ground { fill: oklch(0.67 0.06 105); }
-.alliance-map--pearl .alliance-land-texture__rock-ridge { stroke: oklch(0.45 0.05 100); }
-.alliance-map--pearl .alliance-land-texture__rock-facet { fill: oklch(0.81 0.06 94); }
+.alliance-land-texture__grain { fill: none; stroke: #b0c4d8; stroke-width: 1; opacity: 0.24; }
+.alliance-land-texture__speck { fill: #b0c4d8; opacity: 0.32; }
+.alliance-land-texture__dry-ground { fill: #d9cda4; }
+.alliance-land-texture__dry-ridge { fill: none; stroke: #a99d72; stroke-width: 1.2; opacity: 0.3; }
+.alliance-land-texture__dry-speck { fill: none; stroke: #8e876d; stroke-width: 2; opacity: 0.28; }
+.alliance-land-texture__forest-ground { fill: #9caf8c; }
+.alliance-land-texture__forest-grain { fill: none; stroke: #667f62; stroke-width: 1.1; opacity: 0.28; }
+.alliance-land-texture__canopy { fill: #718d6a; opacity: 0.36; }
+.alliance-land-texture__canopy-small { fill: #b4c49d; opacity: 0.38; }
+.alliance-land-texture__rock-ground { fill: #aaa99c; }
+.alliance-land-texture__rock-ridge { fill: none; stroke: #777368; stroke-width: 1.6; opacity: 0.32; }
+.alliance-land-texture__rock-facet { fill: #c8c6b5; opacity: 0.3; }
+.alliance-map--pearl .alliance-land-texture__dry-ground { fill: #f5e9c4; }
+.alliance-map--pearl .alliance-land-texture__dry-ridge { stroke: #d2d082; }
+.alliance-map--pearl .alliance-land-texture__forest-ground { fill: #4cb86a; }
+.alliance-map--pearl .alliance-land-texture__forest-grain { stroke: #409c43; }
+.alliance-map--pearl .alliance-land-texture__canopy { fill: #29bc56; }
+.alliance-map--pearl .alliance-land-texture__rock-ground { fill: #d4cfb8; }
+.alliance-map--pearl .alliance-land-texture__rock-ridge { stroke: #96784b; }
+.alliance-map--pearl .alliance-land-texture__rock-facet { fill: #e8e0cc; }
 .alliance-climate-field { mix-blend-mode: multiply; pointer-events: none; }
-.alliance-climate-field__gradient { fill: url("#alliance-climate-gradient"); opacity: 0.72; }
-.alliance-climate-field__noise { fill: oklch(0.74 0.025 120); opacity: 0.22; filter: url("#alliance-terrain-noise"); mix-blend-mode: soft-light; }
+.alliance-climate-field__gradient { fill: url("#alliance-climate-gradient"); opacity: 0.68; }
+.alliance-climate-field__noise { fill: #c8d68f; opacity: 0.18; filter: url("#alliance-terrain-noise"); mix-blend-mode: soft-light; }
 .alliance-climate-wash { pointer-events: none; }
 .alliance-climate-wash--ice { fill: url("#alliance-ice-gradient"); }
 .alliance-biome-patch { pointer-events: none; }
@@ -674,45 +681,45 @@ onUnmounted(() => {
 .alliance-biome-patch--wetland { fill: url("#alliance-wetland-gradient"); }
 .alliance-biome-patch--rock { fill: url("#alliance-rock-gradient"); }
 .alliance-band-label { fill: var(--terrain-ink); font: 600 15px "Noto Sans SC Variable", sans-serif; letter-spacing: 1px; opacity: 0.66; paint-order: stroke; stroke: var(--terrain-ocean); stroke-width: 4px; }
-.alliance-equator { stroke: oklch(0.82 0.12 88); stroke-width: 2; stroke-dasharray: 9 10; opacity: 0.82; }
-.alliance-equator-label { fill: oklch(0.9 0.1 88); font: 700 14px "Noto Sans SC Variable", sans-serif; paint-order: stroke; stroke: var(--terrain-ocean); stroke-width: 4px; }
-.alliance-territory__fill { fill: oklch(0.76 0.12 82); fill-opacity: 0.12; stroke: oklch(0.84 0.12 84); stroke-width: 3; stroke-dasharray: 12 10; }
-.alliance-territory__label { fill: oklch(0.91 0.1 88); font: 700 19px "Noto Sans SC Variable", sans-serif; letter-spacing: 1px; paint-order: stroke; stroke: oklch(0.28 0.055 203); stroke-width: 6px; }
+.alliance-equator { stroke: #d06324; stroke-width: 2; stroke-dasharray: 9 10; opacity: 0.82; }
+.alliance-equator-label { fill: #3e3e4b; font: 700 14px "Noto Sans SC Variable", sans-serif; paint-order: stroke; stroke: var(--terrain-ocean); stroke-width: 4px; }
+.alliance-territory__fill { fill: #e1c76e; fill-opacity: 0.42; stroke: #4f4c46; stroke-width: 3; stroke-dasharray: 12 10; }
+.alliance-territory__label { fill: #3e3e4b; font: 700 19px "Noto Sans SC Variable", sans-serif; letter-spacing: 1px; paint-order: stroke; stroke: #eef6fb; stroke-width: 5px; }
 .alliance-regions { pointer-events: none; }
 .alliance-region { stroke-width: 2.5; stroke-dasharray: 11 9; stroke-linejoin: round; }
-.alliance-region--0 { fill: oklch(0.76 0.12 82); fill-opacity: 0.32; stroke: oklch(0.79 0.13 83); }
-.alliance-region--1 { fill: oklch(0.7 0.1 156); fill-opacity: 0.3; stroke: oklch(0.76 0.11 154); }
-.alliance-region--2 { fill: oklch(0.69 0.09 244); fill-opacity: 0.3; stroke: oklch(0.76 0.1 244); }
-.alliance-region--3 { fill: oklch(0.72 0.11 46); fill-opacity: 0.3; stroke: oklch(0.78 0.12 47); }
-.alliance-region--4 { fill: oklch(0.69 0.1 310); fill-opacity: 0.3; stroke: oklch(0.76 0.11 310); }
-.alliance-region__label { fill: oklch(0.93 0.08 88); font: 700 15px "Noto Sans SC Variable", sans-serif; letter-spacing: 0.8px; paint-order: stroke; stroke: oklch(0.26 0.05 205); stroke-width: 5px; }
+.alliance-region--0 { fill: #eef6fb; fill-opacity: 0.32; stroke: #3e3e4b; stroke-opacity: 0.5; }
+.alliance-region--1 { fill: #c8d68f; fill-opacity: 0.3; stroke: #3e3e4b; stroke-opacity: 0.5; }
+.alliance-region--2 { fill: #a6c1fd; fill-opacity: 0.3; stroke: #3e3e4b; stroke-opacity: 0.5; }
+.alliance-region--3 { fill: #fbe79f; fill-opacity: 0.3; stroke: #3e3e4b; stroke-opacity: 0.5; }
+.alliance-region--4 { fill: #96784b; fill-opacity: 0.3; stroke: #3e3e4b; stroke-opacity: 0.5; }
+.alliance-region__label { fill: #3e3e4b; font: 700 15px "Noto Sans SC Variable", sans-serif; letter-spacing: 0.8px; paint-order: stroke; stroke: #eef6fb; stroke-width: 4px; }
 
-.alliance-mountain { fill: url("#alliance-mountain-hatch"); stroke: #8eaa92; stroke-width: 2; opacity: 0.9; }
+.alliance-mountain { fill: none; stroke: #6f6d68; stroke-width: 8; stroke-dasharray: 1 16; stroke-linecap: round; opacity: 0.72; }
 .alliance-mountain-hatch__ground { fill: #314b47; }
 .alliance-mountain-hatch__ridge { fill: none; stroke: #779182; stroke-width: 1.6; opacity: 0.7; }
 .alliance-map--pearl .alliance-mountain-hatch__ground { fill: oklch(0.57 0.045 104); }
 .alliance-map--pearl .alliance-mountain-hatch__ridge { stroke: oklch(0.72 0.05 101); }
-.alliance-river { fill: none; stroke: #73c4cd; stroke-width: 11; stroke-linecap: round; opacity: 0.72; }
-.alliance-lake { fill: #2e7e8a; stroke: #8fd1d0; stroke-width: 2; opacity: 0.82; }
+.alliance-river { fill: none; stroke: #5d97bb; stroke-width: 5; stroke-linecap: round; opacity: 0.82; }
+.alliance-lake { fill: #a6c1fd; stroke: #5f799d; stroke-width: 2; opacity: 0.78; }
 .alliance-road { fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.alliance-road--imperial { stroke: #e0bc70; stroke-width: 9; opacity: 0.82; }
-.alliance-road--regional { stroke: #b3a77f; stroke-width: 5; opacity: 0.72; }
-.alliance-road--local { stroke: #879c8d; stroke-width: 2.5; opacity: 0.62; }
-.alliance-flow-dot { stroke: #102326; stroke-width: 1.5; }
-.alliance-flow-dot--people { fill: #8be2bd; }
-.alliance-flow-dot--vehicle { fill: #79b8e8; }
+.alliance-road--imperial { stroke: #d06324; stroke-width: 9; opacity: 0.82; }
+.alliance-road--regional { stroke: #d06324; stroke-width: 5; opacity: 0.64; stroke-dasharray: 8 4; }
+.alliance-road--local { stroke: #d06324; stroke-width: 2.5; opacity: 0.48; stroke-dasharray: 3 3; }
+.alliance-flow-dot { stroke: #1f3846; stroke-width: 1.5; }
+.alliance-flow-dot--people { fill: #5d97bb; }
+.alliance-flow-dot--vehicle { fill: #d06324; }
 
 .alliance-settlement { cursor: pointer; outline: none; }
-.alliance-settlement__marker { stroke: oklch(0.24 0.045 203); stroke-width: 2.5; stroke-linejoin: round; }
-.alliance-settlement--capital .alliance-settlement__marker { fill: oklch(0.82 0.14 84); }
-.alliance-settlement--town .alliance-settlement__marker { fill: oklch(0.76 0.1 154); }
-.alliance-settlement--village .alliance-settlement__marker { fill: oklch(0.86 0.08 93); }
-.alliance-settlement__marker-core { fill: oklch(0.27 0.045 203); stroke: oklch(0.96 0.06 89); stroke-width: 1.5; pointer-events: none; }
-.alliance-settlement__label { fill: #edf2dd; font: 700 18px "Noto Sans SC Variable", sans-serif; paint-order: stroke; stroke: #132e31; stroke-width: 5px; stroke-linejoin: round; }
+.alliance-settlement__marker { stroke: #3e3e4b; stroke-width: 2.5; stroke-linejoin: round; }
+.alliance-settlement--capital .alliance-settlement__marker { fill: #ffffff; fill-opacity: 0.85; }
+.alliance-settlement--town .alliance-settlement__marker { fill: #ffffff; fill-opacity: 0.78; }
+.alliance-settlement--village .alliance-settlement__marker { fill: #ffffff; fill-opacity: 0.65; }
+.alliance-settlement__marker-core { fill: #3e3e4b; stroke: #ffffff; stroke-width: 1.5; pointer-events: none; }
+.alliance-settlement__label { fill: #3e3e4b; font: 700 18px "Noto Sans SC Variable", sans-serif; paint-order: stroke; stroke: #ffffff; stroke-width: 4px; stroke-linejoin: round; }
 .alliance-settlement--village .alliance-settlement__label { font-size: 13px; font-weight: 500; }
 .alliance-settlement:hover .alliance-settlement__marker,
 .alliance-settlement:focus .alliance-settlement__marker,
-.alliance-settlement.is-selected .alliance-settlement__marker { stroke: oklch(0.91 0.16 86); stroke-width: 4; }
+.alliance-settlement.is-selected .alliance-settlement__marker { stroke: #d06324; stroke-width: 4; }
 
 .alliance-map__legend {
   position: absolute;
@@ -733,18 +740,18 @@ onUnmounted(() => {
   border-color: oklch(0.36 0.05 125 / 0.3);
 }
 .alliance-legend-swatch, .alliance-legend-line { display: inline-block; vertical-align: middle; margin-right: 5px; }
-.alliance-legend-swatch { width: 9px; height: 9px; border-radius: 50%; border: 2px solid #dbe3c5; background: #e5b957; }
-.alliance-legend-swatch--town { background: #9fc49c; }
-.alliance-legend-swatch--village { background: #d6d4a3; }
-.alliance-legend-swatch--lake { background: #2e7e8a; border-color: #8fd1d0; }
-.alliance-legend-line { width: 20px; height: 3px; background: #73c4cd; }
-.alliance-legend-line--road { background: #e0bc70; }
-.alliance-legend-line--region { height: 0; border-top: 2px dashed oklch(0.8 0.13 84); background: transparent; }
+.alliance-legend-swatch { width: 9px; height: 9px; border-radius: 50%; border: 2px solid #3e3e4b; background: #ffffff; }
+.alliance-legend-swatch--town { background: #ffffff; }
+.alliance-legend-swatch--village { background: #ffffff; }
+.alliance-legend-swatch--lake { background: #a6c1fd; border-color: #5f799d; }
+.alliance-legend-line { width: 20px; height: 3px; background: #5d97bb; }
+.alliance-legend-line--road { background: #d06324; }
+.alliance-legend-line--region { height: 0; border-top: 2px dashed #3e3e4b; background: transparent; }
 .alliance-legend-biome { display: inline-block; width: 20px; height: 7px; margin-right: 5px; border-radius: 2px; }
-.alliance-legend-biome--polar { background: linear-gradient(90deg, oklch(0.84 0.045 185), oklch(0.68 0.065 163)); }
-.alliance-legend-biome--temperate { background: linear-gradient(90deg, oklch(0.5 0.095 145), oklch(0.62 0.095 122)); }
-.alliance-legend-biome--arid { background: linear-gradient(90deg, oklch(0.66 0.1 82), oklch(0.73 0.12 74)); }
-.alliance-legend-biome--equatorial { background: linear-gradient(90deg, oklch(0.54 0.115 124), oklch(0.4 0.14 145)); }
+.alliance-legend-biome--polar { background: linear-gradient(90deg, #d5e7eb, #96784b); }
+.alliance-legend-biome--temperate { background: linear-gradient(90deg, #4b6b32, #c8d68f); }
+.alliance-legend-biome--arid { background: linear-gradient(90deg, #d2d082, #fbe79f); }
+.alliance-legend-biome--equatorial { background: linear-gradient(90deg, #29bc56, #7dcb35); }
 
 @media (max-width: 899px) {
   .alliance-map { inset: 0; }

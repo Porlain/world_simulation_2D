@@ -1,4 +1,5 @@
 import type { Coordinate } from "./api";
+import { fractalizeCoastline } from "./coastlineFractal.ts";
 
 export type AllianceSettlementKind = "capital" | "town" | "village";
 
@@ -74,14 +75,58 @@ function point(x: number, y: number): Coordinate {
 const ALLIANCE_SOURCE_BOUNDS = { x0: 45, x1: 920, y0: 90, y1: 850 };
 type AlliancePlacementBounds = { x0: number; x1: number; y0: number; y1: number };
 
-function alliancePlacement(seed: number): AlliancePlacementBounds {
-  const width = 760;
-  const height = 600;
-  const centerX = 1600 + Math.round((stableUnit(seed, "alliance-placement-x") - 0.5) * 220);
-  const centerY = 900 + Math.round((stableUnit(seed, "alliance-placement-y") - 0.5) * 150);
-  const x0 = Math.max(820, Math.min(2240, centerX - width / 2));
-  const y0 = Math.max(520, Math.min(680, centerY - height / 2));
-  return { x0, x1: x0 + width, y0, y1: y0 + height };
+function polygonCentroid(polygon: Coordinate[]): Coordinate {
+  let x = 0;
+  let y = 0;
+  for (const [px, py] of polygon) {
+    x += px;
+    y += py;
+  }
+  return point(x / polygon.length, y / polygon.length);
+}
+
+function positionInsidePolygon(target: Coordinate, fallback: Coordinate, polygon: Coordinate[]): Coordinate {
+  if (pointInsidePolygon(target, polygon)) return target;
+  for (const weight of [0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1]) {
+    const candidate = point(
+      target[0] + (fallback[0] - target[0]) * weight,
+      target[1] + (fallback[1] - target[1]) * weight,
+    );
+    if (pointInsidePolygon(candidate, polygon)) return candidate;
+  }
+  return fallback;
+}
+
+function alliancePlacement(
+  seed: number,
+  host: ContinentSpec,
+  hostPolygon: Coordinate[],
+): AlliancePlacementBounds {
+  const hostCenter = polygonCentroid(hostPolygon);
+  const width = Math.min(620, Math.max(300, host.radius[0] * 0.82));
+  const height = Math.min(460, Math.max(230, host.radius[1] * 0.82));
+  const desired = point(
+    hostCenter[0] + (stableUnit(seed, "alliance-placement-x") - 0.5) * host.radius[0] * 0.28,
+    hostCenter[1] + (stableUnit(seed, "alliance-placement-y") - 0.5) * host.radius[1] * 0.28,
+  );
+  const center = positionInsidePolygon(desired, hostCenter, hostPolygon);
+
+  // Keep the control area inside the host even when the coastline has a deep bay.
+  for (const scale of [1, 0.88, 0.76, 0.64, 0.52]) {
+    const candidate = {
+      x0: center[0] - width * scale / 2,
+      x1: center[0] + width * scale / 2,
+      y0: center[1] - height * scale / 2,
+      y1: center[1] + height * scale / 2,
+    };
+    if (allianceTerritory(candidate).every((item) => pointInsidePolygon(item, hostPolygon))) return candidate;
+  }
+  return {
+    x0: hostCenter[0] - width * 0.42,
+    x1: hostCenter[0] + width * 0.42,
+    y0: hostCenter[1] - height * 0.42,
+    y1: hostCenter[1] + height * 0.42,
+  };
 }
 
 function allianceTerritory(bounds: AlliancePlacementBounds): Coordinate[] {
@@ -134,6 +179,17 @@ function randomizeShape(template: Coordinate[], seed: number, key: string, jitte
   });
 }
 
+function lakeShape(center: Coordinate, radius: Coordinate, seed: number, key: string): Coordinate[] {
+  return Array.from({ length: 14 }, (_, index) => {
+    const angle = index / 14 * Math.PI * 2;
+    const radial = 0.78 + stableUnit(seed, `${key}:shore:${index}`) * 0.34;
+    return point(
+      center[0] + Math.cos(angle) * radius[0] * radial,
+      center[1] + Math.sin(angle) * radius[1] * radial,
+    );
+  });
+}
+
 interface ContinentSpec {
   key: string;
   center: Coordinate;
@@ -151,9 +207,16 @@ function rotateLocal(local: Coordinate, rotation: number): Coordinate {
 
 function continentShape(spec: ContinentSpec, seed: number): Coordinate[] {
   const vertices = spec.vertices ?? 20;
-  return Array.from({ length: vertices }, (_, index) => {
+  const phase2 = stableUnit(seed, `${spec.key}:phase:2`) * Math.PI * 2;
+  const phase3 = stableUnit(seed, `${spec.key}:phase:3`) * Math.PI * 2;
+  const phase5 = stableUnit(seed, `${spec.key}:phase:5`) * Math.PI * 2;
+  const base = Array.from({ length: vertices }, (_, index) => {
     const angle = index / vertices * Math.PI * 2 - Math.PI / 2;
-    const radial = 0.84 + stableUnit(seed, `${spec.key}:coast:${index}`) * 0.24;
+    const lobes = 1
+      + Math.sin(angle * 2 + phase2) * 0.12
+      + Math.sin(angle * 3 + phase3) * 0.17
+      + Math.sin(angle * 5 + phase5) * 0.08;
+    const radial = lobes * (0.91 + stableUnit(seed, `${spec.key}:coast:${index}`) * 0.18);
     const local = rotateLocal([
       Math.cos(angle) * spec.radius[0] * radial,
       Math.sin(angle) * spec.radius[1] * radial,
@@ -164,6 +227,14 @@ function continentShape(spec: ContinentSpec, seed: number): Coordinate[] {
       Math.max(16, Math.min(BOUNDS[3] - 16, spec.center[1] + local[1] + Math.sin(angle) * notch)),
     );
   });
+  const fractal = fractalizeCoastline(
+    base as [number, number][],
+    seed,
+    Math.round(stableUnit(seed, `${spec.key}:fractal`) * 10_000),
+    { width: BOUNDS[2], height: BOUNDS[3] },
+    "island",
+  );
+  return fractal.points.map(([x, y]) => point(x, y));
 }
 
 function mountainRange(
@@ -174,26 +245,22 @@ function mountainRange(
   seed: number,
   key: string,
 ): Coordinate[] {
-  const segments = 8;
-  const top: Coordinate[] = [];
-  const bottom: Coordinate[] = [];
+  const segments = 13;
   const cosine = Math.cos(rotation);
   const sine = Math.sin(rotation);
   const rotate = (local: Coordinate): Coordinate => [
     center[0] + local[0] * cosine - local[1] * sine,
     center[1] + local[0] * sine + local[1] * cosine,
   ];
-  for (let index = 0; index <= segments; index += 1) {
+  return Array.from({ length: segments + 1 }, (_, index) => {
     const ratio = index / segments - 0.5;
-    const thickness = width * (0.58 + stableUnit(seed, `${key}:width:${index}`) * 0.42);
-    const drift = (stableUnit(seed, `${key}:drift:${index}`) - 0.5) * width * 0.5;
-    top.push(rotate([ratio * length, -thickness + drift]));
-    bottom.push(rotate([ratio * length, thickness + drift]));
-  }
-  return [...top, ...bottom.reverse()].map(([x, y]) => point(
-    Math.max(0, Math.min(BOUNDS[2], x)),
-    Math.max(0, Math.min(BOUNDS[3], y)),
-  ));
+    const drift = (stableUnit(seed, `${key}:drift:${index}`) - 0.5) * width;
+    const [x, y] = rotate([ratio * length, drift]);
+    return point(
+      Math.max(0, Math.min(BOUNDS[2], x)),
+      Math.max(0, Math.min(BOUNDS[3], y)),
+    );
+  });
 }
 
 function clipToHalfPlane(polygon: Coordinate[], site: Coordinate, other: Coordinate): Coordinate[] {
@@ -421,8 +488,32 @@ function settlement(
   };
 }
 
+const CONTINENT_SPECS: ContinentSpec[] = [
+  { key: "continent-northwest", center: point(430, 330), radius: point(360, 245), rotation: -0.14, vertices: 28 },
+  { key: "continent-northeast", center: point(2680, 315), radius: point(420, 255), rotation: 0.16, vertices: 30 },
+  { key: "continent-western", center: point(390, 980), radius: point(295, 235), rotation: -0.2, vertices: 26 },
+  { key: "continent-eastern", center: point(2790, 1020), radius: point(325, 250), rotation: 0.1, vertices: 27 },
+  { key: "continent-central", center: point(1570, 850), radius: point(650, 430), rotation: -0.06, vertices: 34 },
+  { key: "continent-southwest", center: point(700, 1480), radius: point(330, 215), rotation: 0.18, vertices: 26 },
+  { key: "continent-southeast", center: point(2460, 1480), radius: point(350, 220), rotation: -0.12, vertices: 27 },
+  { key: "continent-south-polar", center: point(1600, 1755), radius: point(650, 72), rotation: 0, vertices: 26 },
+];
+
+const ISLAND_SPECS: ContinentSpec[] = [
+  { key: "island-north-channel", center: point(1540, 235), radius: point(105, 62), rotation: -0.1, vertices: 16 },
+  { key: "island-west-channel", center: point(980, 475), radius: point(92, 66), rotation: 0.2, vertices: 15 },
+  { key: "island-east-channel", center: point(2170, 505), radius: point(115, 70), rotation: -0.18, vertices: 17 },
+  { key: "island-south-channel", center: point(1580, 1430), radius: point(125, 70), rotation: 0.12, vertices: 17 },
+  { key: "island-far-east", center: point(3070, 610), radius: point(72, 125), rotation: 0.18, vertices: 16 },
+  { key: "island-far-west", center: point(120, 1450), radius: point(95, 62), rotation: -0.1, vertices: 15 },
+];
+
 export function createAlliance(seed = 20260808): AllianceModel {
-  const placement = alliancePlacement(seed);
+  const hostIndex = Math.floor(stableUnit(seed, "alliance-host") * (CONTINENT_SPECS.length - 1));
+  const hostSpec = CONTINENT_SPECS[hostIndex];
+  const continentShapes = CONTINENT_SPECS.map((spec) => continentShape(spec, seed));
+  const hostPolygon = continentShapes[hostIndex];
+  const placement = alliancePlacement(seed, hostSpec, hostPolygon);
   const territory = allianceTerritory(placement);
   const settlements: AllianceSettlement[] = [];
   const capitals = [
@@ -556,33 +647,16 @@ export function createAlliance(seed = 20260808): AllianceModel {
     }
   }
 
-  const continentSpecs: ContinentSpec[] = [
-    { key: "continent-northwest", center: point(430, 330), radius: point(360, 245), rotation: -0.14 },
-    { key: "continent-northeast", center: point(2680, 315), radius: point(420, 255), rotation: 0.16 },
-    { key: "continent-western", center: point(390, 980), radius: point(295, 235), rotation: -0.2 },
-    { key: "continent-eastern", center: point(2790, 1020), radius: point(325, 250), rotation: 0.1 },
-    { key: "continent-southwest", center: point(700, 1480), radius: point(290, 210), rotation: 0.18 },
-    { key: "continent-southeast", center: point(2460, 1480), radius: point(310, 220), rotation: -0.12 },
-    { key: "continent-south-polar", center: point(1600, 1765), radius: point(650, 78), rotation: 0, vertices: 24 },
-  ];
-  const islandSpecs: ContinentSpec[] = [
-    { key: "island-north-channel", center: point(1540, 235), radius: point(105, 62), rotation: -0.1, vertices: 14 },
-    { key: "island-west-channel", center: point(980, 475), radius: point(92, 66), rotation: 0.2, vertices: 13 },
-    { key: "island-east-channel", center: point(2170, 505), radius: point(115, 70), rotation: -0.18, vertices: 15 },
-    { key: "island-south-channel", center: point(1580, 1430), radius: point(125, 70), rotation: 0.12, vertices: 15 },
-    { key: "island-far-east", center: point(3070, 610), radius: point(72, 125), rotation: 0.18, vertices: 14 },
-    { key: "island-far-west", center: point(120, 1450), radius: point(95, 62), rotation: -0.1, vertices: 13 },
-  ];
   const landmasses: Coordinate[][] = [
-    territory,
-    ...continentSpecs.map((spec) => continentShape(spec, seed)),
-    ...islandSpecs.map((spec) => continentShape(spec, seed)),
+    ...continentShapes,
+    ...ISLAND_SPECS.map((spec) => continentShape(spec, seed)),
   ];
   const mountains: Coordinate[][] = [
     mountainRange(point(410, 330), 560, 86, -0.22, seed, "mountain-northwest"),
     mountainRange(point(2680, 320), 680, 92, 0.2, seed, "mountain-northeast"),
     mountainRange(point(390, 980), 470, 78, -0.3, seed, "mountain-western"),
     mountainRange(point(2790, 1020), 500, 80, 0.28, seed, "mountain-eastern"),
+    mountainRange(point(1560, 835), 760, 96, -0.08, seed, "mountain-central"),
     mountainRange(point(700, 1480), 450, 74, 0.2, seed, "mountain-southwest"),
     mountainRange(point(2460, 1480), 520, 82, -0.16, seed, "mountain-southeast"),
     mountainRange(point((placement.x0 + placement.x1) / 2, placement.y0 + 205), 560, 76, 0.12, seed, "mountain-alliance"),
@@ -594,6 +668,8 @@ export function createAlliance(seed = 20260808): AllianceModel {
     randomizeShape([point(2860, 90), point(2790, 270), point(2850, 440), point(2760, 590)], seed, "river-northeast-b", 28),
     randomizeShape([point(280, 790), point(340, 940), point(300, 1100), point(450, 1210)], seed, "river-western", 26),
     randomizeShape([point(2750, 820), point(2700, 960), point(2820, 1110), point(2740, 1215)], seed, "river-eastern", 24),
+    randomizeShape([point(1420, 520), point(1480, 680), point(1450, 860), point(1320, 1040), point(1260, 1190)], seed, "river-central-west", 34),
+    randomizeShape([point(1800, 510), point(1760, 690), point(1840, 850), point(1900, 1020), point(1860, 1200)], seed, "river-central-east", 32),
     randomizeShape([point(620, 1320), point(700, 1410), point(820, 1510), point(900, 1610)], seed, "river-southwest", 24),
     randomizeShape([point(2550, 1320), point(2470, 1420), point(2520, 1540), point(2440, 1640)], seed, "river-southeast", 25),
     randomizeShape([
@@ -609,14 +685,22 @@ export function createAlliance(seed = 20260808): AllianceModel {
       point(placement.x0 + 205, placement.y1 + 40),
     ], seed, "river-alliance-west", 22),
   ];
-  const lakes: Coordinate[][] = [
-    randomizeShape([point(430, 325), point(500, 285), point(570, 320), point(580, 390), point(515, 430), point(445, 400)], seed, "lake-northwest", 22),
-    randomizeShape([point(2600, 300), point(2700, 245), point(2800, 290), point(2810, 380), point(2720, 420), point(2630, 390)], seed, "lake-northeast", 25),
-    randomizeShape([point(280, 1010), point(355, 960), point(430, 1005), point(435, 1080), point(360, 1120), point(290, 1080)], seed, "lake-western", 20),
-    randomizeShape([point(2760, 1015), point(2840, 965), point(2915, 1015), point(2900, 1090), point(2825, 1120), point(2750, 1080)], seed, "lake-eastern", 22),
-    randomizeShape([point(650, 1470), point(720, 1425), point(800, 1465), point(810, 1535), point(740, 1580), point(665, 1540)], seed, "lake-southwest", 18),
-    randomizeShape([point(2430, 1470), point(2500, 1425), point(2575, 1470), point(2560, 1540), point(2480, 1580), point(2420, 1530)], seed, "lake-southeast", 20),
+  const lakeTemplates: Coordinate[][] = [
+    lakeShape(point(500, 350), point(58, 40), seed, "lake-northwest"),
+    lakeShape(point(2710, 335), point(72, 44), seed, "lake-northeast"),
+    lakeShape(point(360, 1040), point(55, 38), seed, "lake-western"),
+    lakeShape(point(2830, 1040), point(58, 40), seed, "lake-eastern"),
+    lakeShape(point(1600, 840), point(74, 45), seed, "lake-central"),
+    lakeShape(point(730, 1500), point(54, 37), seed, "lake-southwest"),
+    lakeShape(point(2490, 1500), point(58, 39), seed, "lake-southeast"),
   ];
+  const lakes = lakeTemplates.map((lake, index) => fractalizeCoastline(
+    lake as [number, number][],
+    seed,
+    20_000 + index,
+    { width: BOUNDS[2], height: BOUNDS[3] },
+    "lake",
+  ).points.map(([x, y]) => point(x, y)));
   const bands: AllianceTerrainBand[] = [
     { id: "polar-north", label: "北极圈", y0: 0, y1: 220, kind: "polar" },
     { id: "north-temperate", label: "北温带", y0: 220, y1: 620, kind: "cold" },

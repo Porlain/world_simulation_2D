@@ -378,11 +378,13 @@ async function pollDraft(draftId: string) {
     draft.value = latest;
     if (latest.compile_status === "ready" && latest.bundle) {
       selectedBundle.value = latest.bundle;
+      worldView.value = "town";
       generationLoading.value = false;
       return;
     }
     if (latest.compile_status === "failed") {
       generationLoading.value = false;
+      worldView.value = "alliance";
       error.value = new ApiError(422, latest.error?.code ?? "scenario_compile_failed", latest.error?.message ?? "城镇编译失败。");
       return;
     }
@@ -423,7 +425,6 @@ async function generateTown(payload: { generationSeed?: number; population: numb
   if (draftPollTimer !== null) window.clearTimeout(draftPollTimer);
   generationLoading.value = true;
   error.value = null;
-  worldView.value = "town";
   selectedScenarioId.value = null;
   selectedRun.value = null;
   selectedBundle.value = null;
@@ -447,6 +448,7 @@ async function generateTown(payload: { generationSeed?: number; population: numb
     }
   } catch (cause) {
     generationLoading.value = false;
+    worldView.value = "alliance";
     error.value = normalizeError(cause);
   }
 }
