@@ -59,6 +59,28 @@ button:focus-visible, input:focus-visible, select:focus-visible, dialog:focus-vi
 }
 
 .map-workspace { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+.alliance-transition {
+  position: absolute;
+  inset: 0;
+  z-index: 780;
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  color: oklch(0.88 0.03 86);
+  background: oklch(0.12 0.025 215 / 96%);
+  animation: alliance-transition-in 180ms ease-out both;
+  pointer-events: all;
+}
+.alliance-transition__mark {
+  width: 34px;
+  height: 34px;
+  border: 2px solid oklch(0.68 0.04 205 / 32%);
+  border-top-color: var(--label-accent);
+  border-radius: 50%;
+  animation: alliance-transition-spin 780ms linear infinite;
+}
+@keyframes alliance-transition-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes alliance-transition-spin { to { transform: rotate(360deg); } }
 .map-header {
   position: absolute;
   inset: 0 calc(var(--inspector-width) + var(--resizer-size)) auto calc(var(--rail-width) + var(--resizer-size));

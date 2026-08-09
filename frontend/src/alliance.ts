@@ -63,26 +63,45 @@ function point(x: number, y: number): Coordinate {
 }
 
 const ALLIANCE_SOURCE_BOUNDS = { x0: 45, x1: 920, y0: 90, y1: 850 };
-const ALLIANCE_TARGET_BOUNDS = { x0: 50, x1: 615, y0: 65, y1: 620 };
-const ALLIANCE_TERRITORY: Coordinate[] = [
-  point(65, 80), point(430, 65), point(590, 145), point(615, 330),
-  point(530, 545), point(305, 620), point(95, 580), point(50, 360),
-];
+type AlliancePlacementBounds = { x0: number; x1: number; y0: number; y1: number };
 
-function fitAlliancePoint(source: Coordinate): Coordinate {
+function alliancePlacement(seed: number): AlliancePlacementBounds {
+  const width = 520;
+  const height = 500;
+  const x0 = 70 + Math.round(stableUnit(seed, "alliance-placement-x") * 110);
+  const y0 = 70 + Math.round(stableUnit(seed, "alliance-placement-y") * 340);
+  return { x0, x1: x0 + width, y0, y1: y0 + height };
+}
+
+function allianceTerritory(bounds: AlliancePlacementBounds): Coordinate[] {
+  const width = bounds.x1 - bounds.x0;
+  const height = bounds.y1 - bounds.y0;
+  return [
+    point(bounds.x0 + width * 0.03, bounds.y0 + height * 0.03),
+    point(bounds.x0 + width * 0.67, bounds.y0),
+    point(bounds.x1 - width * 0.05, bounds.y0 + height * 0.16),
+    point(bounds.x1, bounds.y0 + height * 0.48),
+    point(bounds.x0 + width * 0.85, bounds.y1 - height * 0.14),
+    point(bounds.x0 + width * 0.45, bounds.y1),
+    point(bounds.x0 + width * 0.08, bounds.y1 - height * 0.08),
+    point(bounds.x0, bounds.y0 + height * 0.53),
+  ];
+}
+
+function fitAlliancePoint(source: Coordinate, bounds: AlliancePlacementBounds): Coordinate {
   const xRatio = (source[0] - ALLIANCE_SOURCE_BOUNDS.x0) / (ALLIANCE_SOURCE_BOUNDS.x1 - ALLIANCE_SOURCE_BOUNDS.x0);
   const yRatio = (source[1] - ALLIANCE_SOURCE_BOUNDS.y0) / (ALLIANCE_SOURCE_BOUNDS.y1 - ALLIANCE_SOURCE_BOUNDS.y0);
   return point(
-    ALLIANCE_TARGET_BOUNDS.x0 + xRatio * (ALLIANCE_TARGET_BOUNDS.x1 - ALLIANCE_TARGET_BOUNDS.x0),
-    ALLIANCE_TARGET_BOUNDS.y0 + yRatio * (ALLIANCE_TARGET_BOUNDS.y1 - ALLIANCE_TARGET_BOUNDS.y0),
+    bounds.x0 + xRatio * (bounds.x1 - bounds.x0),
+    bounds.y0 + yRatio * (bounds.y1 - bounds.y0),
   );
 }
 
-function fitAllianceOffset(offset: Coordinate): Coordinate {
+function fitAllianceOffset(offset: Coordinate, bounds: AlliancePlacementBounds): Coordinate {
   return point(
-    offset[0] * (ALLIANCE_TARGET_BOUNDS.x1 - ALLIANCE_TARGET_BOUNDS.x0)
+    offset[0] * (bounds.x1 - bounds.x0)
       / (ALLIANCE_SOURCE_BOUNDS.x1 - ALLIANCE_SOURCE_BOUNDS.x0),
-    offset[1] * (ALLIANCE_TARGET_BOUNDS.y1 - ALLIANCE_TARGET_BOUNDS.y0)
+    offset[1] * (bounds.y1 - bounds.y0)
       / (ALLIANCE_SOURCE_BOUNDS.y1 - ALLIANCE_SOURCE_BOUNDS.y0),
   );
 }
@@ -101,31 +120,124 @@ function pointInsidePolygon(candidate: Coordinate, polygon: Coordinate[]): boole
   return inside;
 }
 
-function positionInsideTerritory(raw: Coordinate, parent: Coordinate): Coordinate {
-  if (pointInsidePolygon(raw, ALLIANCE_TERRITORY)) return point(raw[0], raw[1]);
+function positionInsideTerritory(raw: Coordinate, parent: Coordinate, territory: Coordinate[]): Coordinate {
+  if (pointInsidePolygon(raw, territory)) return point(raw[0], raw[1]);
   for (const parentWeight of [0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1]) {
     const candidate = point(
       raw[0] + (parent[0] - raw[0]) * parentWeight,
       raw[1] + (parent[1] - raw[1]) * parentWeight,
     );
-    if (pointInsidePolygon(candidate, ALLIANCE_TERRITORY)) return candidate;
+    if (pointInsidePolygon(candidate, territory)) return candidate;
   }
   return point(parent[0], parent[1]);
 }
 
-function roadPath(from: Coordinate, to: Coordinate, kind: AllianceRoad["kind"]): Coordinate[] {
+function orientation(start: Coordinate, end: Coordinate, candidate: Coordinate): number {
+  return (end[0] - start[0]) * (candidate[1] - start[1])
+    - (end[1] - start[1]) * (candidate[0] - start[0]);
+}
+
+function keepRoadSide(candidate: Coordinate, anchor: Coordinate, road: [Coordinate, Coordinate]): Coordinate {
+  let adjusted = candidate;
+  const anchorSide = orientation(road[0], road[1], anchor);
+  if (Math.abs(anchorSide) < 0.001) return adjusted;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidateSide = orientation(road[0], road[1], adjusted);
+    if (Math.abs(candidateSide) < 0.001 || candidateSide * anchorSide >= 0) return adjusted;
+    adjusted = point(
+      anchor[0] + (adjusted[0] - anchor[0]) * 0.62,
+      anchor[1] + (adjusted[1] - anchor[1]) * 0.62,
+    );
+  }
+  return adjusted;
+}
+
+function segmentsCross(leftStart: Coordinate, leftEnd: Coordinate, rightStart: Coordinate, rightEnd: Coordinate): boolean {
+  return orientation(leftStart, leftEnd, rightStart) * orientation(leftStart, leftEnd, rightEnd) < 0
+    && orientation(rightStart, rightEnd, leftStart) * orientation(rightStart, rightEnd, leftEnd) < 0;
+}
+
+function pathCrossesExistingRoad(
+  candidate: Coordinate[],
+  existing: AllianceRoad,
+  sharedSettlementIds: Set<string>,
+): boolean {
+  if (sharedSettlementIds.has(existing.fromId) || sharedSettlementIds.has(existing.toId)) return false;
+  for (let leftIndex = 1; leftIndex < candidate.length; leftIndex += 1) {
+    const leftStart = candidate[leftIndex - 1];
+    const leftEnd = candidate[leftIndex];
+    for (let rightIndex = 1; rightIndex < existing.path.length; rightIndex += 1) {
+      if (segmentsCross(leftStart, leftEnd, existing.path[rightIndex - 1], existing.path[rightIndex])) return true;
+    }
+  }
+  return false;
+}
+
+function moveEndpointOffExistingRoads(
+  from: Coordinate,
+  to: Coordinate,
+  existingRoads: AllianceRoad[],
+  sharedSettlementIds: Set<string>,
+): Coordinate {
+  let adjusted = to;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    let blocker: [Coordinate, Coordinate] | null = null;
+    for (const road of existingRoads) {
+      if (sharedSettlementIds.has(road.fromId) || sharedSettlementIds.has(road.toId)) continue;
+      for (let index = 1; index < road.path.length; index += 1) {
+        if (segmentsCross(from, adjusted, road.path[index - 1], road.path[index])) {
+          blocker = [road.path[index - 1], road.path[index]];
+          break;
+        }
+      }
+      if (blocker) break;
+    }
+    if (!blocker) return adjusted;
+
+    const [lineStart, lineEnd] = blocker;
+    const dx = lineEnd[0] - lineStart[0];
+    const dy = lineEnd[1] - lineStart[1];
+    const lengthSquared = dx * dx + dy * dy || 1;
+    const projectionRatio = ((adjusted[0] - lineStart[0]) * dx + (adjusted[1] - lineStart[1]) * dy) / lengthSquared;
+    const projection = point(lineStart[0] + dx * projectionRatio, lineStart[1] + dy * projectionRatio);
+    const normalLength = Math.hypot(dx, dy) || 1;
+    const side = Math.sign(orientation(lineStart, lineEnd, from)) || 1;
+    adjusted = point(
+      projection[0] * 2 - adjusted[0] - dy / normalLength * side * 5,
+      projection[1] * 2 - adjusted[1] + dx / normalLength * side * 5,
+    );
+  }
+  return adjusted;
+}
+
+function roadPath(
+  from: Coordinate,
+  to: Coordinate,
+  kind: AllianceRoad["kind"],
+  existingRoads: AllianceRoad[],
+  fromId: string,
+  toId: string,
+): Coordinate[] {
   if (kind === "imperial") return [from, to];
   const dx = to[0] - from[0];
   const dy = to[1] - from[1];
   const length = Math.hypot(dx, dy) || 1;
   const normal: Coordinate = [-dy / length, dx / length];
   const departure = kind === "regional" ? 0.28 : 0.2;
-  const offset = kind === "regional" ? 9 : 6;
-  const bend = point(
-    from[0] + dx * departure + normal[0] * offset,
-    from[1] + dy * departure + normal[1] * offset,
-  );
-  return [from, bend, to];
+  const offsets = kind === "regional" ? [9, -9, 15, -15, 24, -24] : [6, -6, 12, -12, 18, -18];
+  const departures = [departure, 0.42, 0.58, 0.72];
+  const sharedSettlementIds = new Set([fromId, toId]);
+  for (const offset of offsets) {
+    for (const departureRatio of departures) {
+      const bend = point(
+        from[0] + dx * departureRatio + normal[0] * offset,
+        from[1] + dy * departureRatio + normal[1] * offset,
+      );
+      const candidate = [from, bend, to];
+      if (!existingRoads.some((road) => pathCrossesExistingRoad(candidate, road, sharedSettlementIds))) return candidate;
+    }
+  }
+  return [from, to];
 }
 
 function appendRoad(
@@ -135,11 +247,19 @@ function appendRoad(
   kind: AllianceRoad["kind"],
 ): void {
   const peopleRate = kind === "imperial" ? 0.72 : kind === "regional" ? 0.46 : 0.2;
+  if (kind === "local") {
+    to.position = moveEndpointOffExistingRoads(
+      from.position,
+      to.position,
+      roads,
+      new Set([from.id, to.id]),
+    );
+  }
   roads.push({
     id: `alliance-road-${roads.length.toString().padStart(3, "0")}`,
     fromId: from.id,
     toId: to.id,
-    path: roadPath(from.position, to.position, kind),
+    path: roadPath(from.position, to.position, kind, roads, from.id, to.id),
     kind,
     people: Math.round((from.population + to.population) * peopleRate / 34),
     vehicles: Math.max(3, Math.round((from.population + to.population) * peopleRate / 900)),
@@ -173,15 +293,25 @@ function settlement(
 }
 
 export function createAlliance(seed = 20260808): AllianceModel {
+  const placement = alliancePlacement(seed);
+  const territory = allianceTerritory(placement);
   const settlements: AllianceSettlement[] = [];
   const capitals = [
-    settlement("capital-northwest", "霜原城", "capital", fitAlliancePoint(point(210, 190)), 78_000, null, "北方边境", seed + 11, { influenceRadius: 135 }),
-    settlement("capital-northeast", "晨曦城", "capital", fitAlliancePoint(point(670, 190)), 96_000, null, "东部行省", seed + 17, { influenceRadius: 145 }),
-    settlement("capital-heart", "曙光城", "capital", fitAlliancePoint(point(450, 450)), 124_000, null, "中央行省", seed + 23, { influenceRadius: 155 }),
-    settlement("capital-southwest", "潮汐城", "capital", fitAlliancePoint(point(200, 700)), 91_000, null, "南部海岸", seed + 29, { influenceRadius: 145 }),
-    settlement("capital-southeast", "赤穹城", "capital", fitAlliancePoint(point(660, 700)), 88_000, null, "东南边疆", seed + 31, { influenceRadius: 150 }),
+    settlement("capital-northwest", "霜原城", "capital", fitAlliancePoint(point(210, 190), placement), 78_000, null, "北方边境", seed + 11, { influenceRadius: 180 }),
+    settlement("capital-northeast", "晨曦城", "capital", fitAlliancePoint(point(670, 190), placement), 96_000, null, "东部行省", seed + 17, { influenceRadius: 190 }),
+    settlement("capital-heart", "曙光城", "capital", fitAlliancePoint(point(450, 450), placement), 124_000, null, "中央行省", seed + 23, { influenceRadius: 195 }),
+    settlement("capital-southwest", "潮汐城", "capital", fitAlliancePoint(point(200, 700), placement), 91_000, null, "南部海岸", seed + 29, { influenceRadius: 185 }),
+    settlement("capital-southeast", "赤穹城", "capital", fitAlliancePoint(point(660, 700), placement), 88_000, null, "东南边疆", seed + 31, { influenceRadius: 190 }),
   ];
   settlements.push(...capitals);
+  const outerCapitalRoadOrder = [0, 1, 4, 3];
+  const imperialSegments: Array<[Coordinate, Coordinate]> = [
+    ...outerCapitalRoadOrder.map((capitalIndex, index) => [
+      capitals[capitalIndex].position,
+      capitals[outerCapitalRoadOrder[(index + 1) % outerCapitalRoadOrder.length]].position,
+    ] as [Coordinate, Coordinate]),
+    [capitals[2].position, capitals[0].position],
+  ];
 
   const boundaryTownPlans: Array<{ name: string; position: Coordinate; capitalIndex: number }> = [
     { name: "北关镇", position: point(125, 145), capitalIndex: 0 },
@@ -213,12 +343,12 @@ export function createAlliance(seed = 20260808): AllianceModel {
   const towns: AllianceSettlement[] = [];
   let ordinal = 0;
   const townPlans = [
-    ...boundaryTownPlans.map((plan) => ({ ...plan, position: fitAlliancePoint(plan.position), boundaryAnchor: true })),
+    ...boundaryTownPlans.map((plan) => ({ ...plan, position: fitAlliancePoint(plan.position, placement), boundaryAnchor: true })),
     ...supportTownPlans.map((plan) => ({
       ...plan,
       position: point(
-        capitals[plan.capitalIndex].position[0] + fitAllianceOffset(plan.offset)[0],
-        capitals[plan.capitalIndex].position[1] + fitAllianceOffset(plan.offset)[1],
+        capitals[plan.capitalIndex].position[0] + fitAllianceOffset(plan.offset, placement)[0],
+        capitals[plan.capitalIndex].position[1] + fitAllianceOffset(plan.offset, placement)[1],
       ),
       boundaryAnchor: false,
     })),
@@ -229,7 +359,7 @@ export function createAlliance(seed = 20260808): AllianceModel {
       `town-${townIndex.toString().padStart(2, "0")}`,
       plan.name,
       "town",
-      positionInsideTerritory(plan.position, capital.position),
+      positionInsideTerritory(plan.position, capital.position, territory),
       8_000 + Math.round(stableUnit(seed, `town-pop-${ordinal}`) * 8_500),
       capital.id,
       capital.region,
@@ -251,11 +381,15 @@ export function createAlliance(seed = 20260808): AllianceModel {
         town.position[0] + Math.cos(angle) * distance,
         town.position[1] + Math.sin(angle) * distance,
       );
+      const roadSidePosition = imperialSegments.reduce(
+        (candidate, road) => keepRoadSide(candidate, town.position, road),
+        rawPosition,
+      );
       const village = settlement(
         `village-${townIndex.toString().padStart(2, "0")}-${index}`,
         `${villageNames[(townIndex * 3 + index) % villageNames.length]}村`,
         "village",
-        positionInsideTerritory(rawPosition, town.position),
+        positionInsideTerritory(roadSidePosition, town.position, territory),
         420 + Math.round(stableUnit(seed, `${town.id}:population:${index}`) * 820),
         town.id,
         town.region,
@@ -268,7 +402,6 @@ export function createAlliance(seed = 20260808): AllianceModel {
 
   const byId = new Map(settlements.map((item) => [item.id, item]));
   const roads: AllianceRoad[] = [];
-  const outerCapitalRoadOrder = [0, 1, 4, 3];
   outerCapitalRoadOrder.forEach((capitalIndex, index) => {
     appendRoad(
       roads,
@@ -288,7 +421,7 @@ export function createAlliance(seed = 20260808): AllianceModel {
   }
 
   const landmasses: Coordinate[][] = [
-    ALLIANCE_TERRITORY,
+    territory,
     [point(900, 140), point(1040, 90), point(1190, 150), point(1320, 80), point(1510, 150), point(1600, 360), point(1510, 520), point(1380, 500), point(1260, 600), point(1080, 530), point(950, 430)],
     [point(720, 700), point(900, 650), point(1080, 700), point(1240, 640), point(1440, 760), point(1600, 700), point(1600, 1000), point(720, 1000)],
   ];
@@ -320,7 +453,7 @@ export function createAlliance(seed = 20260808): AllianceModel {
     seed,
     bounds: BOUNDS,
     bands,
-    territory: ALLIANCE_TERRITORY,
+    territory,
     landmasses,
     mountains,
     rivers,

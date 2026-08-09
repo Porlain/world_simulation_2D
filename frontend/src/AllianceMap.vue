@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { LocateFixed, Minus, Plus } from "lucide-vue-next";
 import {
   allianceFlowPoint,
   alliancePolygon,
@@ -19,13 +20,142 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: "select-settlement", settlement: AllianceSettlement): void;
+  (event: "open-settlement", settlement: AllianceSettlement): void;
 }>();
 
 const animationTick = ref(0);
 const compactView = ref(false);
+const zoomFactor = ref(1);
+const viewCenter = ref<[number, number]>([800, 500]);
+const isPanning = ref(false);
+const dragMoved = ref(false);
+let panPointerId: number | null = null;
+let lastPointerPosition: [number, number] | null = null;
 let animationTimer: number | null = null;
 
-const mapViewBox = computed(() => compactView.value ? "0 0 950 1000" : "0 0 1600 1000");
+const compactViewBox = computed(() => {
+  const xs = props.alliance.territory.map(([x]) => x);
+  const ys = props.alliance.territory.map(([, y]) => y);
+  const padding = 60;
+  const x = Math.max(0, Math.min(...xs) - padding);
+  const y = Math.max(0, Math.min(...ys) - padding);
+  const right = Math.min(1600, Math.max(...xs) + padding);
+  const bottom = Math.min(1000, Math.max(...ys) + padding);
+  return `${x} ${y} ${right - x} ${bottom - y}`;
+});
+
+const mapViewBox = computed(() => {
+  const [baseX, baseY, baseWidth, baseHeight] = compactView.value
+    ? compactViewBox.value.split(" ").map(Number)
+    : [0, 0, 1600, 1000];
+  const width = Math.min(baseWidth, baseWidth / zoomFactor.value);
+  const height = Math.min(baseHeight, baseHeight / zoomFactor.value);
+  const x = Math.max(baseX, Math.min(baseX + baseWidth - width, viewCenter.value[0] - width / 2));
+  const y = Math.max(baseY, Math.min(baseY + baseHeight - height, viewCenter.value[1] - height / 2));
+  return `${x} ${y} ${width} ${height}`;
+});
+
+const zoomLabel = computed(() => `${Math.round(zoomFactor.value * 100)}%`);
+const territoryLabelPosition = computed(() => [
+  Math.min(...props.alliance.territory.map(([x]) => x)) + 18,
+  Math.min(...props.alliance.territory.map(([, y]) => y)) + 34,
+]);
+
+function viewBoxNumbers(): [number, number, number, number] {
+  return mapViewBox.value.split(" ").map(Number) as [number, number, number, number];
+}
+
+function clampZoom(value: number): number {
+  return Math.max(1, Math.min(8, value));
+}
+
+function svgPoint(event: PointerEvent | WheelEvent): [number, number] | null {
+  const svg = event.currentTarget instanceof SVGElement ? event.currentTarget : null;
+  if (!svg) return null;
+  const rect = svg.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  const [x, y, width, height] = viewBoxNumbers();
+  return [
+    x + ((event.clientX - rect.left) / rect.width) * width,
+    y + ((event.clientY - rect.top) / rect.height) * height,
+  ];
+}
+
+function applyZoom(nextZoom: number, anchor?: [number, number]): void {
+  const before = anchor;
+  zoomFactor.value = clampZoom(nextZoom);
+  if (!before) return;
+  const [x, y, width, height] = viewBoxNumbers();
+  const cursorRatioX = (before[0] - x) / width;
+  const cursorRatioY = (before[1] - y) / height;
+  viewCenter.value = [
+    before[0] - (cursorRatioX - 0.5) * width,
+    before[1] - (cursorRatioY - 0.5) * height,
+  ];
+}
+
+function zoomIn(): void { applyZoom(zoomFactor.value * 1.25); }
+function zoomOut(): void { applyZoom(zoomFactor.value / 1.25); }
+function resetView(): void {
+  zoomFactor.value = 1;
+  if (compactView.value) {
+    const [x, y, width, height] = compactViewBox.value.split(" ").map(Number);
+    viewCenter.value = [x + width / 2, y + height / 2];
+  } else {
+    viewCenter.value = [800, 500];
+  }
+}
+
+function handleWheel(event: WheelEvent): void {
+  const anchor = svgPoint(event);
+  applyZoom(zoomFactor.value * (event.deltaY < 0 ? 1.2 : 1 / 1.2), anchor ?? undefined);
+}
+
+function handlePointerDown(event: PointerEvent): void {
+  if (event.button !== 0 && event.button !== 1) return;
+  const point = svgPoint(event);
+  if (!point) return;
+  panPointerId = event.pointerId;
+  lastPointerPosition = [event.clientX, event.clientY];
+  dragMoved.value = false;
+  isPanning.value = true;
+  (event.currentTarget as SVGElement).setPointerCapture(event.pointerId);
+}
+
+function handlePointerMove(event: PointerEvent): void {
+  if (!isPanning.value || event.pointerId !== panPointerId || !lastPointerPosition) return;
+  const svg = event.currentTarget as SVGElement;
+  const rect = svg.getBoundingClientRect();
+  const [, , width, height] = viewBoxNumbers();
+  const dx = event.clientX - lastPointerPosition[0];
+  const dy = event.clientY - lastPointerPosition[1];
+  if (Math.abs(dx) + Math.abs(dy) > 3) dragMoved.value = true;
+  viewCenter.value = [
+    viewCenter.value[0] - (dx / rect.width) * width,
+    viewCenter.value[1] - (dy / rect.height) * height,
+  ];
+  lastPointerPosition = [event.clientX, event.clientY];
+}
+
+function endPointer(event: PointerEvent): void {
+  if (event.pointerId !== panPointerId) return;
+  isPanning.value = false;
+  panPointerId = null;
+  lastPointerPosition = null;
+  if ((event.currentTarget as SVGElement).hasPointerCapture(event.pointerId)) {
+    (event.currentTarget as SVGElement).releasePointerCapture(event.pointerId);
+  }
+}
+
+function handleSettlementClick(settlement: AllianceSettlement): void {
+  if (dragMoved.value) return;
+  emit("select-settlement", settlement);
+}
+
+function handleSettlementOpen(settlement: AllianceSettlement): void {
+  if (dragMoved.value) return;
+  emit("open-settlement", settlement);
+}
 
 const flowDots = computed(() => props.alliance.roads.flatMap((road, roadIndex) => {
   const dots = Math.min(5, Math.max(1, Math.ceil((road.people + road.vehicles) / 700 * props.density)));
@@ -50,8 +180,23 @@ function settlementClass(settlement: AllianceSettlement): string {
   return `alliance-settlement alliance-settlement--${settlement.kind}${props.selectedId === settlement.id ? " is-selected" : ""}`;
 }
 
+function shouldShowSettlementLabel(settlement: AllianceSettlement): boolean {
+  if (settlement.kind === "capital") return true;
+  if (settlement.kind === "town") return zoomFactor.value >= 1.4;
+  return zoomFactor.value >= 2.5;
+}
+
 onMounted(() => {
-  const updateViewport = () => { compactView.value = window.innerWidth < 900; };
+  const updateViewport = () => {
+    const nextCompact = window.innerWidth < 900;
+    compactView.value = nextCompact;
+    if (nextCompact) {
+      const [x, y, width, height] = compactViewBox.value.split(" ").map(Number);
+      viewCenter.value = [x + width / 2, y + height / 2];
+    } else {
+      viewCenter.value = [800, 500];
+    }
+  };
   updateViewport();
   window.addEventListener("resize", updateViewport);
   animationTimer = window.setInterval(() => {
@@ -67,7 +212,18 @@ onUnmounted(() => {
 
 <template>
   <div class="alliance-map" :class="`alliance-map--${theme}`">
-    <svg class="alliance-map__svg" :viewBox="mapViewBox" role="img" aria-label="人类联盟势力范围地图">
+    <svg
+      class="alliance-map__svg"
+      :class="{ 'is-panning': isPanning }"
+      :viewBox="mapViewBox"
+      role="img"
+      aria-label="人类联盟势力范围地图"
+      @wheel.prevent="handleWheel"
+      @pointerdown="handlePointerDown"
+      @pointermove="handlePointerMove"
+      @pointerup="endPointer"
+      @pointercancel="endPointer"
+    >
       <defs>
         <pattern id="alliance-grid" width="48" height="48" patternUnits="userSpaceOnUse">
           <path d="M 48 0 L 0 0 0 48" class="alliance-grid-line" fill="none" />
@@ -99,7 +255,7 @@ onUnmounted(() => {
 
       <g class="alliance-territory" aria-label="人类联盟控制区">
         <polygon :points="alliancePolygon(alliance.territory)" class="alliance-territory__fill" />
-        <text x="115" y="155" class="alliance-territory__label">人类联盟控制区</text>
+        <text :x="territoryLabelPosition[0]" :y="territoryLabelPosition[1]" class="alliance-territory__label">人类联盟控制区</text>
       </g>
 
       <g class="alliance-latitudes" clip-path="url(#alliance-land-clip)">
@@ -138,14 +294,21 @@ onUnmounted(() => {
       </g>
 
       <g class="alliance-settlements" aria-label="聚落">
-        <g v-for="settlement in alliance.settlements" :key="settlement.id" :class="settlementClass(settlement)" role="button" tabindex="0" @click="emit('select-settlement', settlement)" @keydown.enter="emit('select-settlement', settlement)">
+        <g v-for="settlement in alliance.settlements" :key="settlement.id" :class="settlementClass(settlement)" role="button" tabindex="0" :aria-label="`${settlement.name}，双击查看街道细节`" @click="handleSettlementClick(settlement)" @dblclick="handleSettlementOpen(settlement)" @keydown.enter="handleSettlementClick(settlement)">
           <title>{{ settlement.name }} · {{ settlement.kind === "capital" ? "主城" : settlement.kind === "town" ? "城镇" : "村庄" }} · {{ settlement.population.toLocaleString("zh-CN") }} 人</title>
           <circle :cx="settlement.position[0]" :cy="settlement.position[1]" :r="settlementRadius(settlement)" class="alliance-settlement__halo" />
           <circle :cx="settlement.position[0]" :cy="settlement.position[1]" :r="settlementRadius(settlement) * 0.58" class="alliance-settlement__core" />
-          <text :x="settlement.position[0] + settlementRadius(settlement) + 8" :y="settlement.position[1] + 4" class="alliance-settlement__label">{{ settlement.name }}</text>
+          <text v-if="shouldShowSettlementLabel(settlement)" :x="settlement.position[0] + settlementRadius(settlement) + 8" :y="settlement.position[1] + 4" class="alliance-settlement__label">{{ settlement.name }}</text>
         </g>
       </g>
     </svg>
+
+    <div class="alliance-map__zoom-controls" aria-label="地图缩放">
+      <button type="button" aria-label="放大地图" title="放大地图" @click="zoomIn"><Plus :size="16" aria-hidden="true" /></button>
+      <span aria-live="polite">{{ zoomLabel }}</span>
+      <button type="button" aria-label="缩小地图" title="缩小地图" @click="zoomOut"><Minus :size="16" aria-hidden="true" /></button>
+      <button type="button" aria-label="重置地图视野" title="重置地图视野" @click="resetView"><LocateFixed :size="16" aria-hidden="true" /></button>
+    </div>
 
     <div class="alliance-map__legend" aria-label="联盟地图图例">
       <span><i class="alliance-legend-swatch alliance-legend-swatch--capital"></i>主城 {{ alliance.settlements.filter((item) => item.kind === "capital").length }}</span>
@@ -172,7 +335,44 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   user-select: none;
+  cursor: grab;
+  touch-action: none;
 }
+.alliance-map__svg.is-panning { cursor: grabbing; }
+.alliance-map__zoom-controls {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px;
+  color: #dbe7d7;
+  background: rgb(11 43 47 / 86%);
+  border: 1px solid rgb(193 213 185 / 28%);
+  border-radius: 5px;
+  box-shadow: 0 8px 20px rgb(0 0 0 / 18%);
+  font: 700 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.alliance-map__zoom-controls button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+.alliance-map__zoom-controls button:hover,
+.alliance-map__zoom-controls button:focus-visible {
+  background: rgb(229 185 87 / 16%);
+  border-color: rgb(229 185 87 / 48%);
+  outline: none;
+}
+.alliance-map__zoom-controls span { min-width: 38px; text-align: center; }
 
 .alliance-map__ground { fill: #0b2b31; }
 .alliance-ocean-texture { opacity: 0.2; mix-blend-mode: screen; }

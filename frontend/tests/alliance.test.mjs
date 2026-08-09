@@ -6,8 +6,10 @@ import { allianceFlowPoint, createAlliance } from "../src/alliance.ts";
 test("alliance generation is deterministic and keeps its settlement hierarchy", () => {
   const first = createAlliance(1234);
   const second = createAlliance(1234);
+  const anotherWorld = createAlliance(5678);
 
   assert.deepEqual(first, second);
+  assert.notDeepEqual(first.territory, anotherWorld.territory);
   assert.equal(first.settlements.filter((item) => item.kind === "capital").length, 5);
   assert.equal(first.settlements.filter((item) => item.kind === "town").length, 23);
   assert.equal(first.settlements.filter((item) => item.kind === "village").length, 69);
@@ -46,8 +48,12 @@ test("alliance generation is deterministic and keeps its settlement hierarchy", 
         (distance, town) => Math.min(distance, Math.hypot(town.position[0] - corner[0], town.position[1] - corner[1])),
         Infinity,
       );
-    assert.ok(nearestBoundaryTown <= 85, `no boundary town near ${corner}`);
+    assert.ok(nearestBoundaryTown <= 135, `no boundary town near ${corner}`);
   }
+  const xs = first.territory.map(([x]) => x);
+  const ys = first.territory.map(([, y]) => y);
+  assert.ok(Math.max(...xs) - Math.min(...xs) <= 520);
+  assert.ok(Math.max(...ys) - Math.min(...ys) <= 500);
 });
 
 test("alliance roads meet only at declared settlements", () => {

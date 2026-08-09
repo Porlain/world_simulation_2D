@@ -432,17 +432,20 @@ function enterAllianceSettlementById(settlementId: string) {
 }
 
 async function enterAllianceSettlement(settlement = focusedAllianceSettlement.value) {
-  if (!settlement || activeRun.value || allianceTransitioning.value) return;
+  if (!settlement || activeRun.value || generationLoading.value || allianceTransitioning.value) return;
   selectedAllianceId.value = settlement.id;
   allianceTransitioning.value = true;
   await nextTick();
-  await generateTown({
-    name: settlement.name,
-    population: settlement.population,
-    generationSeed: settlement.generationSeed,
-    generationSize: settlement.kind === "capital" ? "city" : settlement.kind,
-  });
-  window.setTimeout(() => { allianceTransitioning.value = false; }, 360);
+  try {
+    await generateTown({
+      name: settlement.name,
+      population: settlement.population,
+      generationSeed: settlement.generationSeed,
+      generationSize: settlement.kind === "capital" ? "city" : settlement.kind,
+    });
+  } finally {
+    window.setTimeout(() => { allianceTransitioning.value = false; }, 260);
+  }
 }
 
 function backToAlliance() {
@@ -803,6 +806,7 @@ onUnmounted(() => {
         :running="worldRunStatus === 'running'"
         :run-rate="worldRunRate"
         @select-settlement="selectAllianceSettlement"
+        @open-settlement="enterAllianceSettlement"
       />
       <CityMap
         v-else
@@ -819,6 +823,11 @@ onUnmounted(() => {
         @select-feature="selectedFeatureId = $event"
         @set-analysis-flow="analysisFlow = $event"
       />
+
+      <div v-if="allianceTransitioning" class="alliance-transition" role="status" aria-live="polite">
+        <span class="alliance-transition__mark" aria-hidden="true"></span>
+        <span>正在载入聚落街道</span>
+      </div>
 
       <header class="map-header">
         <div class="map-title" aria-live="polite">
