@@ -504,7 +504,7 @@ onUnmounted(() => {
 
       <g class="alliance-settlements" aria-label="聚落">
         <template v-for="settlement in alliance.settlements" :key="settlement.id">
-          <g v-if="shouldShowSettlement(settlement)" :class="settlementClass(settlement)" role="button" tabindex="0" :aria-label="`${settlement.name}，双击查看街道细节`" @click="handleSettlementClick(settlement)" @dblclick="handleSettlementOpen(settlement)" @keydown.enter="handleSettlementClick(settlement)">
+          <g v-if="shouldShowSettlement(settlement)" :class="settlementClass(settlement)" role="button" tabindex="0" :aria-label="`${settlement.name}，双击查看街道细节`" @pointerdown.stop @click="handleSettlementClick(settlement)" @dblclick="handleSettlementOpen(settlement)" @keydown.enter="handleSettlementClick(settlement)">
             <title>{{ settlement.name }} · {{ settlement.kind === "capital" ? "主城" : settlement.kind === "town" ? "城镇" : "村庄" }} · {{ settlement.population.toLocaleString("zh-CN") }} 人</title>
             <path :d="settlementMarkerPath(settlement)" class="alliance-settlement__marker" />
             <path v-if="settlement.kind === 'capital'" :d="`M${settlement.position[0]},${settlement.position[1] - 5} L${settlement.position[0] + 5},${settlement.position[1] + 4} L${settlement.position[0]},${settlement.position[1] + 8} L${settlement.position[0] - 5},${settlement.position[1] + 4} Z`" class="alliance-settlement__marker-core" />
