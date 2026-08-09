@@ -371,10 +371,6 @@ onUnmounted(() => {
         <pattern id="alliance-grid" width="48" height="48" patternUnits="userSpaceOnUse">
           <path d="M 48 0 L 0 0 0 48" class="alliance-grid-line" fill="none" />
         </pattern>
-        <pattern id="alliance-mountain-hatch" width="42" height="30" patternUnits="userSpaceOnUse">
-          <rect width="42" height="30" class="alliance-mountain-hatch__ground" />
-          <path d="M2 27 L13 9 L24 27 M18 27 L30 4 L40 27" class="alliance-mountain-hatch__ridge" />
-        </pattern>
         <pattern id="alliance-land-texture" width="36" height="36" patternUnits="userSpaceOnUse">
           <rect width="36" height="36" class="alliance-land-texture__ground" />
           <path d="M0 9 L36 3 M-5 26 L28 18 M17 38 L42 31" class="alliance-land-texture__grain" />
@@ -695,10 +691,6 @@ onUnmounted(() => {
 .alliance-region__label { fill: #3e3e4b; font: 700 15px "Noto Sans SC Variable", sans-serif; letter-spacing: 0.8px; paint-order: stroke; stroke: #eef6fb; stroke-width: 4px; }
 
 .alliance-mountain { fill: none; stroke: #6f6d68; stroke-width: 8; stroke-dasharray: 1 16; stroke-linecap: round; opacity: 0.72; }
-.alliance-mountain-hatch__ground { fill: #314b47; }
-.alliance-mountain-hatch__ridge { fill: none; stroke: #779182; stroke-width: 1.6; opacity: 0.7; }
-.alliance-map--pearl .alliance-mountain-hatch__ground { fill: oklch(0.57 0.045 104); }
-.alliance-map--pearl .alliance-mountain-hatch__ridge { stroke: oklch(0.72 0.05 101); }
 .alliance-river { fill: none; stroke: #5d97bb; stroke-width: 5; stroke-linecap: round; opacity: 0.82; }
 .alliance-lake { fill: #a6c1fd; stroke: #5f799d; stroke-width: 2; opacity: 0.78; }
 .alliance-road { fill: none; stroke-linecap: round; stroke-linejoin: round; }
