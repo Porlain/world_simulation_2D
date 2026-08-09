@@ -75,6 +75,8 @@ class TownGenerationRequest(StrictModel):
     generation_seed: int | None = Field(default=None, ge=0, le=2**53 - 1)
     population: int = Field(ge=100, le=100_000)
     name: str | None = Field(default=None, min_length=1, max_length=64)
+    generator: Literal["radial-v1", "watabou-v1"] = "watabou-v1"
+    generation_size: Literal["village", "town", "city"] = "town"
 
     @field_validator("name")
     @classmethod
@@ -131,7 +133,18 @@ class TownStreet(StrictModel):
     to_junction_id: Identifier
     path: list[Coordinate] = Field(min_length=2)
     width: FiniteFloat = Field(gt=0)
-    kind: Literal["primary", "ring", "secondary"]
+    kind: Literal["primary", "ring", "secondary", "lane", "alley"]
+    pedestrian_access: bool = True
+    vehicle_access: bool = True
+
+
+class TownWalkway(StrictModel):
+    id: Identifier
+    district_id: Identifier
+    path: list[Coordinate] = Field(min_length=2)
+    width: FiniteFloat = Field(gt=0)
+    pedestrian_access: bool = True
+    vehicle_access: bool = False
 
 
 class TownLandmark(StrictModel):
@@ -157,7 +170,7 @@ class TownSkeleton(StrictModel):
     scenario_id: Identifier
     name: str = Field(min_length=1, max_length=64)
     generation_seed: int = Field(ge=0, le=2**53 - 1)
-    generator_version: Literal["radial-v1"] = "radial-v1"
+    generator_version: Literal["radial-v1", "watabou-v1"] = "watabou-v1"
     requested_population: int = Field(ge=100, le=100_000)
     initial_vehicle_count: int = Field(ge=5, le=1000)
     coordinate_system: Literal["local_xy"] = "local_xy"
@@ -169,7 +182,9 @@ class TownSkeleton(StrictModel):
     buildings: list[TownBuilding] = Field(min_length=1)
     junctions: list[TownJunction] = Field(min_length=1)
     streets: list[TownStreet] = Field(min_length=1)
+    walkways: list[TownWalkway] = Field(default_factory=list)
     landmarks: list[TownLandmark] = Field(min_length=1)
+    district_names: dict[str, str] = Field(default_factory=dict)
 
 
 class FlowLocation(StrictModel):
@@ -187,6 +202,9 @@ class FlowConnection(StrictModel):
     street_segment_ids: list[Identifier] = Field(min_length=1)
     street_directions: list[Literal["forward", "reverse"]] = Field(default_factory=list)
     path: list[Coordinate] = Field(min_length=2)
+    flow_street_segment_ids: dict[str, list[Identifier]] = Field(default_factory=dict)
+    flow_street_directions: dict[str, list[Literal["forward", "reverse"]]] = Field(default_factory=dict)
+    flow_paths: dict[str, list[Coordinate]] = Field(default_factory=dict)
     travel_time_ticks: dict[str, PositiveTick]
     capacity_per_tick: CountMap
     demand_per_tick: dict[str, DemandRange]

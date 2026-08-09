@@ -47,6 +47,7 @@ def utc_now() -> str:
 class RunRecord:
     id: str
     scenario_id: str
+    scenario_name: str | None
     scenario_schema_version: int
     scenario_checksum: str
     seed: int
@@ -194,6 +195,7 @@ class Storage:
             rows = connection.execute(
                 """
                 SELECT id, scenario_id, scenario_schema_version, scenario_checksum,
+                       scenario_bundle_json,
                        seed, status, rate, current_tick, started_at, ended_at,
                        error_code, error_message
                 FROM runs ORDER BY started_at DESC LIMIT ?
@@ -207,6 +209,7 @@ class Storage:
             row = connection.execute(
                 """
                 SELECT id, scenario_id, scenario_schema_version, scenario_checksum,
+                       scenario_bundle_json,
                        seed, status, rate, current_tick, started_at, ended_at,
                        error_code, error_message
                 FROM runs WHERE id = ?
@@ -341,6 +344,7 @@ class Storage:
         return RunRecord(
             id=row["id"],
             scenario_id=row["scenario_id"],
+            scenario_name=Storage._scenario_name(row["scenario_bundle_json"]),
             scenario_schema_version=row["scenario_schema_version"],
             scenario_checksum=row["scenario_checksum"],
             seed=row["seed"],
@@ -352,3 +356,14 @@ class Storage:
             error_code=row["error_code"],
             error_message=row["error_message"],
         )
+
+    @staticmethod
+    def _scenario_name(bundle_json: str | None) -> str | None:
+        if not bundle_json:
+            return None
+        try:
+            payload = json.loads(bundle_json)
+            name = payload.get("town_skeleton", {}).get("name") or payload.get("config", {}).get("name")
+            return str(name) if name else None
+        except (TypeError, ValueError, AttributeError):
+            return None

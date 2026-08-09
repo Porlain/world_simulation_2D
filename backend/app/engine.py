@@ -350,9 +350,17 @@ def _street_bucket_map(
     flow_id: str,
     lengths: dict[str, float],
 ) -> list[tuple[int, str, str]]:
-    if package.street_graph is None or not connection.street_directions:
+    if package.street_graph is None:
         return []
-    route_lengths = [lengths[street_id] for street_id in connection.street_segment_ids]
+    route_street_ids = connection.flow_street_segment_ids.get(flow_id)
+    route_directions = connection.flow_street_directions.get(flow_id)
+    if route_street_ids is None:
+        route_street_ids = connection.street_segment_ids
+    if route_directions is None:
+        route_directions = connection.street_directions
+    if not route_street_ids or not route_directions:
+        return []
+    route_lengths = [lengths[street_id] for street_id in route_street_ids]
     cumulative: list[float] = []
     total = 0.0
     for length in route_lengths:
@@ -368,8 +376,8 @@ def _street_bucket_map(
         result.append(
             (
                 route_index,
-                connection.street_segment_ids[route_index],
-                connection.street_directions[route_index],
+                route_street_ids[route_index],
+                route_directions[route_index],
             )
         )
     return result
@@ -406,7 +414,9 @@ def _street_snapshots(
     }
     route_values = {
         connection.id: {
-            flow_id: [0] * len(connection.street_segment_ids)
+            flow_id: [0] * len(
+                connection.flow_street_segment_ids.get(flow_id, connection.street_segment_ids)
+            )
             for flow_id in flow_ids
         }
         for connection in package.connections

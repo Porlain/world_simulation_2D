@@ -6,11 +6,13 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "typecheck": "vue-tsc --noEmit",
+    "test:unit": "node --experimental-strip-types --experimental-specifier-resolution=node --test tests/*.test.mjs",
     "build": "npm run typecheck && vite build",
     "test:e2e": "playwright test"
   },
   "dependencies": {
     "@deck.gl/core": "^9.3.7",
+    "@deck.gl/extensions": "^9.3.7",
     "@deck.gl/layers": "^9.3.7",
     "@fontsource-variable/noto-sans-sc": "^5.3.0",
     "lucide-vue-next": "^0.468.0",

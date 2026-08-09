@@ -1,4 +1,5 @@
 import { COORDINATE_SYSTEM, type Color, type Layer } from "@deck.gl/core";
+import { PathStyleExtension } from "@deck.gl/extensions";
 import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import type {
   BuildingKind,
@@ -9,6 +10,8 @@ import type {
   ScenarioBundle,
   SnapshotState,
   TownLandmark,
+  TownStreet,
+  TownWalkway,
 } from "./api";
 
 export interface TownFeature {
@@ -27,7 +30,10 @@ export interface TownRenderData {
   districts: TownFeature[];
   buildings: TownFeature[];
   streets: TownFeature[];
+  walkways: TownFeature[];
   walls: TownFeature[];
+  ground: TownFeature[];
+  functionalZones: TownFeature[];
   landmarks: TownFeature[];
 }
 
@@ -40,6 +46,8 @@ export interface TownLayerVisibility {
   vehicles: boolean;
   heat: boolean;
 }
+
+export type FlowAnalysisMode = "people" | "vehicle";
 
 const allLayersVisible: TownLayerVisibility = {
   walls: true,
@@ -68,7 +76,13 @@ export interface TownFlowRoad extends TownFeature {
   peopleReverse: number;
   vehicleForward: number;
   vehicleReverse: number;
+  roadKind?: TownStreetKind | "walkway";
+  pedestrianAccess?: boolean;
+  vehicleAccess?: boolean;
+  localEstimate?: boolean;
 }
+
+type TownStreetKind = "primary" | "ring" | "secondary" | "lane" | "alley";
 
 interface FlowMarker extends TownFeature {
   position: Coordinate;
@@ -76,7 +90,21 @@ interface FlowMarker extends TownFeature {
   sourceId: string;
   fromName?: string;
   toName?: string;
-  polygon?: Coordinate[];
+  polygon: Coordinate[];
+  angle: number;
+}
+
+interface MarkerCandidate extends FlowMarker {
+  weight: number;
+  coverageId?: string;
+}
+
+interface DirectionalRoad {
+  id: string;
+  path: Coordinate[];
+  direction: "forward" | "reverse";
+  count: number;
+  ratio: number;
 }
 
 export interface TownFlowRenderData {
@@ -86,39 +114,149 @@ export interface TownFlowRenderData {
 }
 
 const districtColors: Record<DistrictKind, Color> = {
-  residential: [111, 112, 111, 18],
-  market: [167, 145, 119, 28],
-  industrial: [148, 117, 96, 26],
-  storage: [127, 133, 119, 24],
-  religious: [133, 126, 139, 24],
-  civic: [160, 139, 117, 30],
-  military: [125, 103, 96, 26],
-  stable: [151, 135, 104, 24],
+  residential: [20, 34, 52, 42],
+  market: [56, 44, 30, 46],
+  industrial: [42, 40, 38, 44],
+  storage: [30, 42, 48, 42],
+  religious: [40, 32, 48, 46],
+  civic: [30, 42, 56, 48],
+  military: [52, 34, 32, 46],
+  stable: [46, 40, 30, 44],
+};
+
+const pearlDistrictColors: Record<DistrictKind, Color> = {
+  residential: [175, 168, 148, 42],
+  market: [195, 168, 128, 46],
+  industrial: [172, 162, 142, 42],
+  storage: [168, 172, 155, 42],
+  religious: [180, 155, 145, 46],
+  civic: [160, 168, 178, 48],
+  military: [185, 155, 135, 46],
+  stable: [180, 162, 132, 42],
 };
 
 const buildingColors: Record<BuildingKind, Color> = {
-  residential: [104, 117, 138, 236],
-  market: [111, 119, 132, 238],
-  workshop: [103, 112, 128, 238],
-  storage: [96, 109, 126, 238],
-  religious: [115, 119, 137, 242],
-  administrative: [94, 108, 129, 244],
-  military: [89, 101, 116, 242],
-  stable: [108, 115, 129, 238],
+  residential: [28, 44, 64, 255],
+  market: [72, 54, 38, 255],
+  workshop: [54, 50, 44, 255],
+  storage: [38, 52, 56, 255],
+  religious: [50, 40, 58, 255],
+  administrative: [38, 54, 68, 255],
+  military: [62, 42, 40, 255],
+  stable: [56, 50, 38, 255],
+  tavern: [78, 54, 32, 255],
+  academy: [38, 50, 68, 255],
+  hospital: [68, 64, 56, 255],
+};
+
+const pearlBuildingColors: Record<BuildingKind, Color> = {
+  residential: [148, 170, 138, 255],
+  market: [192, 162, 118, 255],
+  workshop: [165, 158, 138, 255],
+  storage: [150, 165, 150, 255],
+  religious: [170, 148, 162, 255],
+  administrative: [138, 158, 182, 255],
+  military: [180, 148, 132, 255],
+  stable: [170, 158, 128, 255],
+  tavern: [192, 152, 110, 255],
+  academy: [138, 155, 185, 255],
+  hospital: [185, 178, 165, 255],
 };
 
 const landmarkColors: Record<string, Color> = {
-  gate: [76, 72, 68, 245],
-  plaza: [219, 205, 178, 246],
-  market: [170, 125, 105, 245],
-  workshop: [154, 116, 92, 245],
-  storage: [132, 126, 106, 245],
-  religious: [143, 126, 143, 245],
-  administrative: [107, 111, 124, 245],
-  military: [83, 82, 80, 245],
-  stable: [155, 136, 95, 245],
-  residential: [109, 119, 134, 245],
+  gate: [104, 110, 126, 255],
+  plaza: [220, 226, 236, 220],
+  market: [224, 170, 52, 255],
+  workshop: [192, 138, 88, 255],
+  storage: [132, 156, 138, 255],
+  religious: [150, 120, 178, 255],
+  administrative: [82, 148, 212, 255],
+  military: [222, 92, 78, 255],
+  stable: [178, 148, 78, 255],
+  tavern: [212, 150, 68, 255],
+  academy: [112, 152, 214, 255],
+  hospital: [202, 196, 180, 255],
+  residential: [106, 130, 144, 255],
 };
+
+const pearlLandmarkColors: Record<string, Color> = {
+  gate: [82, 68, 56, 255],
+  plaza: [52, 42, 34, 225],
+  market: [210, 164, 68, 255],
+  workshop: [175, 130, 82, 255],
+  storage: [132, 155, 130, 255],
+  religious: [152, 118, 170, 255],
+  administrative: [72, 138, 192, 255],
+  military: [196, 96, 76, 255],
+  stable: [170, 140, 76, 255],
+  tavern: [202, 142, 62, 255],
+  academy: [100, 136, 192, 255],
+  hospital: [192, 182, 162, 255],
+  residential: [110, 135, 142, 255],
+};
+
+const mapColors = {
+  selection: [223, 174, 78, 255] as Color,
+  selectionSoft: [223, 174, 78, 185] as Color,
+  edge: [65, 91, 101, 225] as Color,
+  road: [105, 127, 136, 235] as Color,
+  walkway: [92, 111, 110, 230] as Color,
+  wall: [137, 126, 101, 255] as Color,
+  buildingEdge: [76, 104, 116, 215] as Color,
+  label: [233, 230, 216, 255] as Color,
+  people: [93, 210, 177, 255] as Color,
+  vehicle: [112, 177, 218, 255] as Color,
+};
+
+const pearlMapColors = {
+  selection: [204, 118, 52, 255] as Color,
+  selectionSoft: [204, 118, 52, 175] as Color,
+  edge: [121, 94, 65, 210] as Color,
+  road: [218, 194, 151, 245] as Color,
+  walkway: [174, 146, 103, 235] as Color,
+  wall: [104, 77, 51, 255] as Color,
+  buildingEdge: [105, 78, 52, 205] as Color,
+  label: [60, 44, 30, 255] as Color,
+  people: [48, 133, 105, 255] as Color,
+  vehicle: [56, 106, 151, 255] as Color,
+};
+
+const buildingDisplayNames: Record<BuildingKind, string> = {
+  residential: "居民楼",
+  market: "商铺",
+  workshop: "工坊",
+  storage: "仓库",
+  religious: "神殿",
+  administrative: "行政厅",
+  military: "兵营",
+  stable: "马厩",
+  tavern: "酒馆",
+  academy: "学院",
+  hospital: "医馆",
+};
+
+type ZoneRgb = readonly [number, number, number];
+
+const zoneColors: Record<string, ZoneRgb> = {
+  administrative: [72, 148, 214],
+  market: [220, 166, 65],
+  religious: [160, 115, 194],
+  military: [212, 88, 78],
+  workshop: [197, 126, 74],
+  storage: [120, 154, 111],
+  stable: [107, 151, 119],
+};
+
+const pearlZoneColors: Record<string, ZoneRgb> = {
+  administrative: [55, 114, 169],
+  market: [181, 126, 38],
+  religious: [130, 87, 157],
+  military: [166, 67, 57],
+  workshop: [157, 91, 46],
+  storage: [89, 121, 77],
+  stable: [77, 116, 84],
+};
+
 
 function boundsFromBundle(bundle: ScenarioBundle): readonly [number, number, number, number] {
   if (bundle.town_skeleton) return bundle.town_skeleton.bounds;
@@ -131,48 +269,240 @@ function boundsFromBundle(bundle: ScenarioBundle): readonly [number, number, num
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
 
-function locationByFeature(bundle: ScenarioBundle): Map<string, string> {
-  return new Map(Object.entries(bundle.simulation_package?.bindings.location_feature_ids ?? {}).flatMap(
-    ([locationId, featureIds]) => featureIds.map((featureId) => [featureId, locationId]),
-  ));
+function polygonCenter(polygon: Coordinate[]): Coordinate {
+  return [
+    polygon.reduce((sum, point) => sum + point[0], 0) / polygon.length,
+    polygon.reduce((sum, point) => sum + point[1], 0) / polygon.length,
+  ];
 }
 
-function wallSegments(boundary: Coordinate[], landmarks: TownLandmark[]): TownFeature[] {
-  const gates = landmarks.filter((landmark) => landmark.kind === "gate").map((landmark) => landmark.position);
-  const result: TownFeature[] = [];
+function townEdgeBoundary(skeleton: NonNullable<ScenarioBundle["town_skeleton"]>): Coordinate[] {
+  const points = skeleton.districts.flatMap((district) => district.polygon);
+  if (points.length < 3) return [...skeleton.boundary];
+  const sorted = [...new Map(points.map((point) => [`${point[0]}:${point[1]}`, point])).values()]
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (origin: Coordinate, a: Coordinate, b: Coordinate) =>
+    (a[0] - origin[0]) * (b[1] - origin[1]) - (a[1] - origin[1]) * (b[0] - origin[0]);
+  const lower: Coordinate[] = [];
+  for (const point of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], point) <= 0) lower.pop();
+    lower.push(point);
+  }
+  const upper: Coordinate[] = [];
+  for (const point of [...sorted].reverse()) {
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], point) <= 0) upper.pop();
+    upper.push(point);
+  }
+  const hull = [...lower.slice(0, -1), ...upper.slice(0, -1)];
+  return hull.length >= 3 ? hull : [...skeleton.boundary];
+}
+
+function projectToBoundary(point: Coordinate, boundary: Coordinate[]): Coordinate {
+  let best = boundary[0] ?? point;
+  let bestDistance = Number.POSITIVE_INFINITY;
   for (let index = 0; index < boundary.length; index += 1) {
     const start = boundary[index];
     const end = boundary[(index + 1) % boundary.length];
     const dx = end[0] - start[0];
     const dy = end[1] - start[1];
-    const length = Math.hypot(dx, dy);
-    const gate = gates.find((point) => {
-      const cross = Math.abs(dx * (point[1] - start[1]) - dy * (point[0] - start[0]));
-      const dot = (point[0] - start[0]) * dx + (point[1] - start[1]) * dy;
-      return cross <= length * 0.01 && dot >= 0 && dot <= length * length;
-    });
-    if (!gate || length <= 8) {
-      result.push({ id: `wall-${index}`, name: "Town Wall", kind: "wall", path: [start, end] });
-      continue;
+    const lengthSquared = dx * dx + dy * dy;
+    const ratio = lengthSquared <= 0 ? 0 : Math.max(0, Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / lengthSquared));
+    const candidate: Coordinate = [start[0] + dx * ratio, start[1] + dy * ratio];
+    const distance = (candidate[0] - point[0]) ** 2 + (candidate[1] - point[1]) ** 2;
+    if (distance < bestDistance) {
+      best = candidate;
+      bestDistance = distance;
     }
-    const ux = dx / length;
-    const uy = dy / length;
-    result.push(
-      {
-        id: `wall-${index}-a`,
-        name: "Town Wall",
-        kind: "wall",
-        path: [start, [gate[0] - ux * 4, gate[1] - uy * 4]],
-      },
-      {
-        id: `wall-${index}-b`,
-        name: "Town Wall",
-        kind: "wall",
-        path: [[gate[0] + ux * 4, gate[1] + uy * 4], end],
-      },
-    );
   }
+  return best;
+}
+
+function pointInsideBoundary(point: Coordinate, boundary: Coordinate[]): boolean {
+  let inside = false;
+  for (let index = 0; index < boundary.length; index += 1) {
+    const start = boundary[index];
+    const end = boundary[(index + 1) % boundary.length];
+    const cross = (point[0] - start[0]) * (end[1] - start[1]) - (point[1] - start[1]) * (end[0] - start[0]);
+    const dot = (point[0] - start[0]) * (point[0] - end[0]) + (point[1] - start[1]) * (point[1] - end[1]);
+    if (Math.abs(cross) < 0.001 && dot <= 0) return true;
+    if ((start[1] > point[1]) !== (end[1] > point[1])) {
+      const xAtY = (end[0] - start[0]) * (point[1] - start[1]) / (end[1] - start[1]) + start[0];
+      if (point[0] < xAtY) inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function segmentBoundaryParameter(
+  start: Coordinate,
+  end: Coordinate,
+  edgeStart: Coordinate,
+  edgeEnd: Coordinate,
+): number | null {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const ex = edgeEnd[0] - edgeStart[0];
+  const ey = edgeEnd[1] - edgeStart[1];
+  const denominator = dx * ey - dy * ex;
+  if (Math.abs(denominator) < 0.000001) return null;
+  const offsetX = edgeStart[0] - start[0];
+  const offsetY = edgeStart[1] - start[1];
+  const t = (offsetX * ey - offsetY * ex) / denominator;
+  const u = (offsetX * dy - offsetY * dx) / denominator;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? t : null;
+}
+
+function clipPathToBoundary(path: Coordinate[], boundary: Coordinate[]): Coordinate[] {
+  if (path.length < 2 || boundary.length < 3) return path;
+  const pieces: Coordinate[][] = [];
+  let current: Coordinate[] = [];
+  const flush = () => {
+    if (current.length >= 2) pieces.push(current);
+    current = [];
+  };
+  const samePoint = (left: Coordinate, right: Coordinate) =>
+    Math.abs(left[0] - right[0]) < 0.001 && Math.abs(left[1] - right[1]) < 0.001;
+
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const start = path[index];
+    const end = path[index + 1];
+    const parameters = [0, 1];
+    for (let edgeIndex = 0; edgeIndex < boundary.length; edgeIndex += 1) {
+      const parameter = segmentBoundaryParameter(
+        start,
+        end,
+        boundary[edgeIndex],
+        boundary[(edgeIndex + 1) % boundary.length],
+      );
+      if (parameter !== null) parameters.push(parameter);
+    }
+    parameters.sort((left, right) => left - right);
+    const uniqueParameters = parameters.filter((parameter, parameterIndex) => parameterIndex === 0 || parameter - parameters[parameterIndex - 1] > 0.000001);
+    for (let partIndex = 0; partIndex < uniqueParameters.length - 1; partIndex += 1) {
+      const from = uniqueParameters[partIndex];
+      const to = uniqueParameters[partIndex + 1];
+      const midpoint = (from + to) / 2;
+      const midpointPoint: Coordinate = [start[0] + (end[0] - start[0]) * midpoint, start[1] + (end[1] - start[1]) * midpoint];
+      if (!pointInsideBoundary(midpointPoint, boundary)) {
+        flush();
+        continue;
+      }
+      const fromPoint: Coordinate = [start[0] + (end[0] - start[0]) * from, start[1] + (end[1] - start[1]) * from];
+      const toPoint: Coordinate = [start[0] + (end[0] - start[0]) * to, start[1] + (end[1] - start[1]) * to];
+      if (!current.length) current.push(fromPoint);
+      else if (!samePoint(current[current.length - 1], fromPoint)) {
+        flush();
+        current.push(fromPoint);
+      }
+      if (!samePoint(current[current.length - 1], toPoint)) current.push(toPoint);
+    }
+  }
+  flush();
+  if (!pieces.length) return [];
+  return pieces.reduce((longest, piece) => piece.length > longest.length ? piece : longest, pieces[0]);
+}
+
+function functionalZones(skeleton: NonNullable<ScenarioBundle["town_skeleton"]>): TownFeature[] {
+  const buildings = new Map(skeleton.buildings.map((building) => [building.id, building]));
+  const districts = new Map(skeleton.districts.map((district) => [district.id, district]));
+  const seen = new Set<string>();
+  const zones: TownFeature[] = [];
+  for (const landmark of skeleton.landmarks) {
+    if (landmark.kind === "gate" || landmark.kind === "plaza" || !landmark.building_id) continue;
+    const building = buildings.get(landmark.building_id);
+    const district = building ? districts.get(building.district_id) : undefined;
+    if (!district || !zoneColors[landmark.kind]) continue;
+    const key = `${landmark.kind}:${district.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    zones.push({
+      id: `functional-zone-${landmark.kind}-${district.id}`,
+      sourceId: district.id,
+      name: `${landmark.name}范围`,
+      kind: landmark.kind,
+      polygon: district.polygon,
+      position: polygonCenter(district.polygon),
+    });
+  }
+  return zones;
+}
+
+const locationFeatureCache = new WeakMap<ScenarioBundle, Map<string, string>>();
+const walkwayLocationCache = new WeakMap<ScenarioBundle, Map<string, TownWalkway[]>>();
+const flowConnectionCache = new WeakMap<ScenarioBundle, FlowConnection[]>();
+const flowLocationCache = new WeakMap<ScenarioBundle, Array<{ id: string; name: string; position: Coordinate }>>();
+const streetCache = new WeakMap<ScenarioBundle, Map<string, TownStreet>>();
+
+function locationByFeature(bundle: ScenarioBundle): Map<string, string> {
+  const cached = locationFeatureCache.get(bundle);
+  if (cached) return cached;
+  const result = new Map(Object.entries(bundle.simulation_package?.bindings.location_feature_ids ?? {}).flatMap(
+    ([locationId, featureIds]) => featureIds.map((featureId) => [featureId, locationId] as [string, string]),
+  ));
+  locationFeatureCache.set(bundle, result);
   return result;
+}
+
+function townWalkways(bundle: ScenarioBundle): TownWalkway[] {
+  const skeleton = bundle.town_skeleton;
+  if (!skeleton) return [];
+  const boundary = townEdgeBoundary(skeleton);
+  if (skeleton.walkways !== undefined) {
+    return skeleton.walkways
+      .map((walkway) => ({ ...walkway, path: clipPathToBoundary(walkway.path, boundary) }))
+      .filter((walkway) => walkway.path.length >= 2);
+  }
+
+  return [];
+}
+
+function walkwaysByLocation(bundle: ScenarioBundle): Map<string, TownWalkway[]> {
+  const cached = walkwayLocationCache.get(bundle);
+  if (cached) return cached;
+  const result = new Map<string, TownWalkway[]>();
+  const boundLocation = locationByFeature(bundle);
+  for (const walkway of townWalkways(bundle)) {
+    const locationId = boundLocation.get(walkway.id)
+      ?? boundLocation.get(walkway.district_id)
+      ?? `location-${walkway.district_id}`;
+    const entries = result.get(locationId) ?? [];
+    entries.push(walkway);
+    result.set(locationId, entries);
+  }
+  walkwayLocationCache.set(bundle, result);
+  return result;
+}
+
+function townStreetsById(bundle: ScenarioBundle): Map<string, TownStreet> {
+  const cached = streetCache.get(bundle);
+  if (cached) return cached;
+  const skeleton = bundle.town_skeleton;
+  const boundary = skeleton ? townEdgeBoundary(skeleton) : [];
+  const result = new Map(
+    (skeleton?.streets ?? [])
+      .map((street) => ({ ...street, path: clipPathToBoundary(street.path, boundary) }))
+      .filter((street) => street.path.length >= 2)
+      .map((street) => [street.id, street] as [string, TownStreet]),
+  );
+  streetCache.set(bundle, result);
+  return result;
+}
+
+function wallSegments(boundary: Coordinate[], landmarks: TownLandmark[]): TownFeature[] {
+  const gates = landmarks.filter((landmark) => landmark.kind === "gate").map((landmark) => landmark.position);
+  // No gate landmarks → not a walled town → don't render walls
+  if (gates.length === 0) return [];
+  const wornWall = boundary.length <= 12;
+  return boundary.map((start, index) => {
+    const end = boundary[(index + 1) % boundary.length];
+    return {
+      id: `wall-${index}`,
+      name: wornWall ? "残旧城墙" : "城墙",
+      kind: "wall",
+      path: [start, end],
+      width: wornWall ? 3.2 + (index % 3) * 0.35 : 4,
+    };
+  });
 }
 
 function rectangle(position: Coordinate, width: number, height: number, rotation = 0): Coordinate[] {
@@ -249,10 +579,81 @@ function landmarkMotif(feature: TownFeature, size: number): TownFeature[] {
         part("range-b", rectangle(offset(position, size * 0.34, 0), size * 0.42, size * 1.35)),
         part("crossing", rectangle(position, size * 0.68, size * 0.24)),
       ];
+    case "tavern":
+      return [
+        part("hall", rectangle(position, size * 1.1, size * 0.85)),
+        part("chimney", rectangle(offset(position, size * 0.37, -size * 0.2), size * 0.16, size * 0.35)),
+        part("sign", circle(offset(position, 0, size * 0.55), size * 0.22, 6)),
+      ];
+    case "academy":
+      return [
+        part("main", rectangle(position, size * 1.25, size * 0.7)),
+        part("court", rectangle(offset(position, 0, -size * 0.68), size * 0.6, size * 0.42)),
+        part("tower", rectangle(offset(position, 0, size * 0.6), size * 0.32, size * 0.48)),
+      ];
+    case "hospital":
+      return [
+        part("hwing", rectangle(position, size * 1.1, size * 0.35)),
+        part("vwing", rectangle(position, size * 0.35, size * 1.1)),
+        ...([-0.52, 0.52] as const).flatMap((x) => ([-0.52, 0.52] as const).map((y) =>
+          part(`court-${x > 0 ? "r" : "l"}-${y > 0 ? "u" : "d"}`, circle(offset(position, x * size, y * size), size * 0.18, 8)),
+        )),
+      ];
     case "plaza":
       return [
         part("square", rectangle(position, size * 1.35, size * 1.35)),
         part("fountain", circle(position, size * 0.27, 12)),
+      ];
+    case "fountain":
+      return [
+        part("basin", circle(position, size * 0.72, 16)),
+        part("rim", circle(position, size * 0.52, 12)),
+        part("spout", circle(position, size * 0.15, 6)),
+        part("splash-n", circle(offset(position, 0, size * 0.33), size * 0.08, 4)),
+        part("splash-s", circle(offset(position, 0, -size * 0.33), size * 0.08, 4)),
+        part("splash-e", circle(offset(position, size * 0.33, 0), size * 0.08, 4)),
+        part("splash-w", circle(offset(position, -size * 0.33, 0), size * 0.08, 4)),
+      ];
+    case "statue":
+      return [
+        part("base", rectangle(offset(position, 0, -size * 0.35), size * 0.7, size * 0.3)),
+        part("pedestal", rectangle(offset(position, 0, -size * 0.15), size * 0.32, size * 0.5)),
+        part("figure", rectangle(offset(position, 0, size * 0.2), size * 0.12, size * 0.38)),
+        part("head", circle(offset(position, 0, size * 0.46), size * 0.1, 6)),
+      ];
+    case "obelisk":
+      return [
+        part("plinth", rectangle(position, size * 0.6, size * 0.24)),
+        part("shaft", [
+          [position[0] - size * 0.08, position[1] - size * 0.12],
+          [position[0] + size * 0.08, position[1] - size * 0.12],
+          [position[0] + size * 0.03, position[1] + size * 0.8],
+          [position[0] - size * 0.03, position[1] + size * 0.8],
+        ]),
+        part("cap", [
+          [position[0], position[1] + size * 0.95],
+          [position[0] - size * 0.08, position[1] + size * 0.78],
+          [position[0] + size * 0.08, position[1] + size * 0.78],
+        ]),
+      ];
+    case "well":
+      return [
+        part("ring", circle(position, size * 0.5, 14)),
+        part("inner", circle(position, size * 0.28, 10)),
+        part("roof-beam", rectangle(offset(position, 0, size * 0.3), size * 0.8, size * 0.08)),
+        part("roof-beam-2", rectangle(position, size * 0.08, size * 0.8)),
+        part("roof", [
+          [position[0], position[1] + size * 0.5],
+          [position[0] - size * 0.6, position[1] + size * 0.25],
+          [position[0] + size * 0.6, position[1] + size * 0.25],
+        ]),
+      ];
+    case "grand-tree":
+      return [
+        part("trunk", rectangle(position, size * 0.14, size * 0.5)),
+        part("canopy", circle(offset(position, 0, size * 0.28), size * 0.62, 18)),
+        part("canopy-l", circle(offset(position, -size * 0.28, size * 0.12), size * 0.35, 12)),
+        part("canopy-r", circle(offset(position, size * 0.28, size * 0.12), size * 0.35, 12)),
       ];
     case "gate":
       return [
@@ -268,11 +669,25 @@ function landmarkMotif(feature: TownFeature, size: number): TownFeature[] {
 export function assembleTownRenderData(bundle: ScenarioBundle): TownRenderData {
   const skeleton = bundle.town_skeleton;
   if (!skeleton) {
+    const bounds = boundsFromBundle(bundle);
     return {
-      bounds: boundsFromBundle(bundle),
+      bounds,
       districts: [],
       buildings: [],
       walls: [],
+      walkways: [],
+      ground: [{
+        id: "legacy-ground",
+        name: "聚落地表",
+        kind: "ground",
+        polygon: [
+          [bounds[0], bounds[1]],
+          [bounds[2], bounds[1]],
+          [bounds[2], bounds[3]],
+          [bounds[0], bounds[3]],
+        ],
+      }],
+      functionalZones: [],
       streets: bundle.config.connections.map((connection) => ({
         id: connection.id,
         name: `${connection.from_location_id} -> ${connection.to_location_id}`,
@@ -289,6 +704,7 @@ export function assembleTownRenderData(bundle: ScenarioBundle): TownRenderData {
     };
   }
   const boundLocation = locationByFeature(bundle);
+  const townEdge = townEdgeBoundary(skeleton);
   return {
     bounds: skeleton.bounds,
     districts: skeleton.districts.map((district) => ({
@@ -301,7 +717,7 @@ export function assembleTownRenderData(bundle: ScenarioBundle): TownRenderData {
     buildings: skeleton.buildings.map((building) => ({
       id: building.id,
       sourceId: boundLocation.get(building.id),
-      name: building.kind,
+      name: buildingDisplayNames[building.kind] ?? building.kind,
       kind: building.kind,
       polygon: building.polygon,
     })),
@@ -309,17 +725,36 @@ export function assembleTownRenderData(bundle: ScenarioBundle): TownRenderData {
       id: street.id,
       name: street.kind,
       kind: street.kind,
-      path: street.path,
+      path: clipPathToBoundary(street.path, townEdge),
       width: street.width,
+    })).filter((street) => street.path.length >= 2),
+    walkways: townWalkways(bundle).map((walkway) => ({
+      id: walkway.id,
+      sourceId: boundLocation.get(walkway.id),
+      name: "建筑间步道",
+      kind: "walkway",
+      path: walkway.path,
+      width: walkway.width,
     })),
-    walls: wallSegments(skeleton.boundary, skeleton.landmarks),
+    walls: wallSegments(townEdge, skeleton.landmarks),
+    ground: [{ id: "settlement-ground", name: "聚落地表", kind: "ground", polygon: townEdge }],
+    functionalZones: functionalZones(skeleton),
     landmarks: skeleton.landmarks.map((landmark) => ({
       id: landmark.id,
       sourceId: boundLocation.get(landmark.id),
       name: landmark.name,
       kind: landmark.kind,
-      position: landmark.position,
+      position: landmark.kind === "gate" ? projectToBoundary(landmark.position, townEdge) : landmark.position,
     })),
+  };
+}
+
+function colorsForTheme(theme: "pearl" | "night") {
+  return {
+    mc: theme === "pearl" ? pearlMapColors : mapColors,
+    dc: theme === "pearl" ? pearlDistrictColors : districtColors,
+    bc: theme === "pearl" ? pearlBuildingColors : buildingColors,
+    lc: theme === "pearl" ? pearlLandmarkColors : landmarkColors,
   };
 }
 
@@ -327,17 +762,38 @@ export function createStaticTownLayers(
   data: TownRenderData,
   selectedFeatureId: string | null,
   visibility: TownLayerVisibility = allLayersVisible,
+  compactLabels = false,
+  modelMatrix?: Float32Array,
+  theme: "pearl" | "night" = "night",
 ): Layer[] {
   const width = Math.max(1, data.bounds[2] - data.bounds[0]);
   const height = Math.max(1, data.bounds[3] - data.bounds[1]);
   const landmarkSize = Math.max(7, Math.min(18, Math.hypot(width, height) * 0.014));
   const landmarkPolygons = data.landmarks.flatMap((feature) => landmarkMotif(feature, landmarkSize));
+  const compactLabelKinds = new Set(["gate", "plaza", "administrative", "market", "religious"]);
+  const labelLandmarks = compactLabels
+    ? data.landmarks.filter((feature) => compactLabelKinds.has(feature.kind))
+    : data.landmarks;
+  const zoneLabels = compactLabels ? data.functionalZones.filter((_, index) => index % 2 === 0) : data.functionalZones;
+  const center: Coordinate = [(data.bounds[0] + data.bounds[2]) / 2, (data.bounds[1] + data.bounds[3]) / 2];
   const wallTowers = Array.from(new Map(data.walls.flatMap((wall) => wall.path ?? []).map((position, index) => [
     `${position[0]}:${position[1]}`,
     { id: `wall-tower-${index}`, name: "Wall Tower", kind: "wall", position },
   ])).values());
-  const common = { coordinateSystem: COORDINATE_SYSTEM.CARTESIAN } as const;
+  const { mc, dc, bc, lc } = colorsForTheme(theme);
+  const groundColor: Color = theme === "pearl" ? [148, 111, 66, 62] : [34, 63, 67, 72];
+  const common = { coordinateSystem: COORDINATE_SYSTEM.CARTESIAN, ...(modelMatrix ? { modelMatrix } : {}) } as const;
   return [
+    new PolygonLayer<TownFeature>({
+      id: "settlement-ground",
+      data: data.ground,
+      ...common,
+      pickable: false,
+      stroked: false,
+      filled: true,
+      getPolygon: (feature) => feature.polygon!,
+      getFillColor: groundColor,
+    }),
     new PolygonLayer<TownFeature>({
       id: "district-fill",
       data: data.districts,
@@ -347,10 +803,29 @@ export function createStaticTownLayers(
       filled: true,
       lineWidthUnits: "pixels",
       getPolygon: (feature) => feature.polygon!,
-      getFillColor: (feature) => districtColors[feature.kind as DistrictKind] ?? [111, 112, 111, 18],
-      getLineColor: (feature) => feature.id === selectedFeatureId ? [181, 106, 63, 220] : [111, 105, 96, 35],
+      getFillColor: (feature) => dc[feature.kind as DistrictKind] ?? [54, 81, 91, 30],
+      getLineColor: (feature) => feature.id === selectedFeatureId ? mc.selection : mc.buildingEdge,
       getLineWidth: (feature) => feature.id === selectedFeatureId ? 2 : 0.5,
     }),
+    ...(visibility.landmarks && data.functionalZones.length ? [new PolygonLayer<TownFeature>({
+      id: "functional-zones",
+      data: data.functionalZones,
+      ...common,
+      pickable: false,
+      stroked: true,
+      filled: true,
+      lineWidthUnits: "pixels",
+      getPolygon: (feature) => feature.polygon!,
+      getFillColor: (feature) => {
+        const [r, g, b] = (theme === "pearl" ? pearlZoneColors : zoneColors)[feature.kind] ?? [120, 120, 120];
+        return [r, g, b, 40] as Color;
+      },
+      getLineColor: (feature) => {
+        const [r, g, b] = (theme === "pearl" ? pearlZoneColors : zoneColors)[feature.kind] ?? [120, 120, 120];
+        return [r, g, b, 160] as Color;
+      },
+      getLineWidth: 1.25,
+    })] : []),
     ...(visibility.buildings ? [new PolygonLayer<TownFeature>({
       id: "building-fill",
       data: data.buildings,
@@ -360,9 +835,32 @@ export function createStaticTownLayers(
       filled: true,
       lineWidthUnits: "pixels",
       getPolygon: (feature) => feature.polygon!,
-      getFillColor: (feature) => buildingColors[feature.kind as BuildingKind] ?? buildingColors.residential,
-      getLineColor: (feature) => feature.id === selectedFeatureId ? [181, 106, 63, 255] : [77, 83, 92, 230],
-      getLineWidth: (feature) => feature.id === selectedFeatureId ? 2 : 0.65,
+      getFillColor: (feature) => bc[feature.kind as BuildingKind] ?? bc.residential,
+      getLineColor: (feature) => feature.id === selectedFeatureId ? mc.selection : mc.buildingEdge,
+      getLineWidth: (feature) => feature.id === selectedFeatureId ? 2.5 : 0.85,
+    })] : []),
+    ...(visibility.roads && data.walkways.length ? [new PathLayer<TownFeature>({
+      id: "block-walkway-edge",
+      data: data.walkways,
+      ...common,
+      pickable: false,
+      widthUnits: "pixels",
+      capRounded: true,
+      jointRounded: true,
+      getPath: (feature) => feature.path!,
+      getColor: mc.edge,
+      getWidth: 4,
+    }), new PathLayer<TownFeature>({
+      id: "block-walkway-base",
+      data: data.walkways,
+      ...common,
+      pickable: false,
+      widthUnits: "pixels",
+      capRounded: true,
+      jointRounded: true,
+      getPath: (feature) => feature.path!,
+      getColor: mc.walkway,
+      getWidth: 2.4,
     })] : []),
     ...(visibility.roads ? [new PathLayer<TownFeature>({
       id: "road-edge",
@@ -373,8 +871,8 @@ export function createStaticTownLayers(
       capRounded: true,
       jointRounded: true,
       getPath: (feature) => feature.path!,
-      getColor: (feature) => feature.id === selectedFeatureId ? [181, 106, 63, 190] : [163, 160, 151, 210],
-      getWidth: (feature) => feature.kind === "primary" ? 8 : feature.kind === "ring" ? 5 : 3,
+      getColor: (feature) => feature.id === selectedFeatureId ? mc.selectionSoft : mc.edge,
+      getWidth: (feature) => feature.kind === "primary" ? 8 : feature.kind === "ring" ? 5 : feature.kind === "secondary" ? 3 : feature.kind === "lane" ? 1.8 : 1.2,
     }),
     new PathLayer<TownFeature>({
       id: "road-base",
@@ -385,8 +883,13 @@ export function createStaticTownLayers(
       capRounded: true,
       jointRounded: true,
       getPath: (feature) => feature.path!,
-      getColor: (feature) => feature.id === selectedFeatureId ? [181, 106, 63, 255] : [237, 233, 222, 245],
-      getWidth: (feature) => feature.kind === "primary" ? 6 : feature.kind === "ring" ? 3.5 : 2,
+      getColor: (feature) => {
+        if (feature.id === selectedFeatureId) return mc.selection;
+        if (feature.kind === "alley") return [mc.road[0], mc.road[1], mc.road[2], 135];
+        if (feature.kind === "lane") return [mc.road[0], mc.road[1], mc.road[2], 190];
+        return mc.road;
+      },
+      getWidth: (feature) => feature.kind === "primary" ? 6 : feature.kind === "ring" ? 3.5 : feature.kind === "secondary" ? 2 : feature.kind === "lane" ? 1.35 : 0.95,
     })] : []),
     ...(visibility.walls ? [new PathLayer<TownFeature>({
       id: "boundary-wall",
@@ -397,8 +900,8 @@ export function createStaticTownLayers(
       capRounded: false,
       jointRounded: false,
       getPath: (feature) => feature.path!,
-      getColor: (feature) => feature.id === selectedFeatureId ? [181, 106, 63, 255] : [61, 61, 59, 245],
-      getWidth: (feature) => feature.id === selectedFeatureId ? 5.5 : 4,
+      getColor: (feature) => feature.id === selectedFeatureId ? mc.selection : mc.wall,
+      getWidth: (feature) => feature.id === selectedFeatureId ? 5.5 : feature.width ?? 4,
     }),
     new ScatterplotLayer<TownFeature>({
       id: "wall-towers",
@@ -408,7 +911,7 @@ export function createStaticTownLayers(
       radiusUnits: "pixels",
       getPosition: (feature) => feature.position!,
       getRadius: 3,
-      getFillColor: [61, 61, 59, 245],
+      getFillColor: mc.wall,
     })] : []),
     ...(visibility.landmarks ? [new PolygonLayer<TownFeature>({
       id: "landmark-symbols",
@@ -419,27 +922,74 @@ export function createStaticTownLayers(
       filled: true,
       lineWidthUnits: "pixels",
       getPolygon: (feature) => feature.polygon!,
-      getFillColor: (feature) => landmarkColors[feature.kind] ?? landmarkColors.residential,
-      getLineColor: (feature) => feature.sourceId === selectedFeatureId ? [181, 106, 63, 255] : [63, 61, 56, 225],
+      getFillColor: (feature) => lc[feature.kind] ?? lc.residential,
+      getLineColor: (feature) => feature.sourceId === selectedFeatureId ? mc.selection : mc.buildingEdge,
       getLineWidth: (feature) => feature.sourceId === selectedFeatureId ? 2.5 : 1,
     }),
     new TextLayer<TownFeature>({
+      id: "functional-zone-labels",
+      data: zoneLabels,
+      ...common,
+      pickable: false,
+      billboard: true,
+      fontFamily: "Noto Sans SC Variable",
+      fontWeight: 600,
+      getText: (feature) => feature.name,
+      getPosition: (feature) => feature.position!,
+      getColor: (feature) => {
+        const [r, g, b] = (theme === "pearl" ? pearlZoneColors : zoneColors)[feature.kind] ?? [120, 120, 120];
+        return [r, g, b, 210] as Color;
+      },
+      getSize: compactLabels ? 9 : 10,
+      getTextAnchor: "middle",
+      getAlignmentBaseline: "center",
+      background: true,
+      getBackgroundColor: theme === "pearl" ? [248, 244, 232, 185] as Color : [10, 14, 22, 175] as Color,
+      backgroundPadding: [3, 2],
+    }),
+    new TextLayer<TownFeature>({
       id: "landmark-labels",
-      data: data.landmarks,
+      data: labelLandmarks,
       ...common,
       pickable: false,
       billboard: true,
       characterSet: "auto",
-      fontFamily: "Georgia",
-      fontWeight: 500,
+      fontFamily: "Noto Sans SC Variable",
+      fontWeight: 650,
       getText: (feature) => feature.name,
       getPosition: (feature) => feature.position!,
-      getColor: [152, 89, 77, 238],
-      getSize: 13,
-      getPixelOffset: [0, -13],
-      getTextAnchor: "middle",
+      getColor: mc.label,
+      getSize: compactLabels ? 10 : 12,
+      getPixelOffset: (feature) => {
+        if (feature.kind === "gate" && feature.position) {
+          const dx = feature.position[0] - center[0];
+          const dy = feature.position[1] - center[1];
+          if (Math.abs(dx) > Math.abs(dy)) return [dx > 0 ? -16 : 16, 0];
+          return [0, dy > 0 ? -20 : 20];
+        }
+        const offsets: Record<string, [number, number]> = {
+          plaza: compactLabels ? [24, 34] : [0, 28],
+          administrative: compactLabels ? [-42, -26] : [0, -24],
+          market: compactLabels ? [42, -16] : [40, 0],
+          religious: compactLabels ? [-42, -16] : [-40, 0],
+          military: [34, -24],
+          storage: [30, 25],
+          workshop: [38, 18],
+          stable: [-38, 18],
+        };
+        return offsets[feature.kind] ?? [0, -13];
+      },
+      getTextAnchor: (feature) => {
+        if (feature.kind !== "gate" || !feature.position) return "middle";
+        const dx = feature.position[0] - center[0];
+        const dy = feature.position[1] - center[1];
+        if (Math.abs(dx) <= Math.abs(dy)) return "middle";
+        return dx > 0 ? "end" : "start";
+      },
       getAlignmentBaseline: "bottom",
-      background: false,
+      background: true,
+      getBackgroundColor: theme === "pearl" ? [248, 244, 232, 220] as Color : [10, 14, 22, 225] as Color,
+      backgroundPadding: [4, 3],
     })] : []),
   ];
 }
@@ -449,6 +999,8 @@ type FlowConnection = {
   path: Coordinate[];
   streetIds: string[];
   streetDirections: Array<"forward" | "reverse">;
+  flowStreetIds: Record<string, string[]>;
+  flowStreetDirections: Record<string, Array<"forward" | "reverse">>;
   fromLocationId: string;
   toLocationId: string;
   capacity: Record<string, number>;
@@ -456,28 +1008,39 @@ type FlowConnection = {
 };
 
 function flowConnections(bundle: ScenarioBundle): FlowConnection[] {
+  const cached = flowConnectionCache.get(bundle);
+  if (cached) return cached;
+  let result: FlowConnection[];
+  const boundary = bundle.town_skeleton ? townEdgeBoundary(bundle.town_skeleton) : [];
   if (bundle.simulation_package) {
-    return bundle.simulation_package.connections.map((connection) => ({
+    result = bundle.simulation_package.connections.map((connection) => ({
       id: connection.id,
-      path: connection.path,
+      path: clipPathToBoundary(connection.path, boundary),
       streetIds: connection.street_segment_ids,
       streetDirections: connection.street_directions ?? [],
+      flowStreetIds: connection.flow_street_segment_ids ?? {},
+      flowStreetDirections: connection.flow_street_directions ?? {},
       fromLocationId: connection.from_location_id,
       toLocationId: connection.to_location_id,
       capacity: connection.capacity_per_tick,
       travelTime: connection.travel_time_ticks,
     }));
+  } else {
+    result = bundle.config.connections.map((connection) => ({
+      id: connection.id,
+      path: clipPathToBoundary(connection.path, boundary),
+      streetIds: [connection.id],
+      streetDirections: [],
+      flowStreetIds: {},
+      flowStreetDirections: {},
+      fromLocationId: connection.from_location_id,
+      toLocationId: connection.to_location_id,
+      capacity: connection.capacity_per_tick,
+      travelTime: Object.fromEntries(bundle.config.flow_types.map((flow) => [flow.id, connection.travel_time_ticks])),
+    }));
   }
-  return bundle.config.connections.map((connection) => ({
-    id: connection.id,
-    path: connection.path,
-    streetIds: [connection.id],
-    streetDirections: [],
-    fromLocationId: connection.from_location_id,
-    toLocationId: connection.to_location_id,
-    capacity: connection.capacity_per_tick,
-    travelTime: Object.fromEntries(bundle.config.flow_types.map((flow) => [flow.id, connection.travel_time_ticks])),
-  }));
+  flowConnectionCache.set(bundle, result);
+  return result;
 }
 
 function flowIds(bundle: ScenarioBundle): { people: string | null; vehicle: string | null } {
@@ -511,17 +1074,39 @@ function pathPoint(path: Coordinate[], progress: number): { position: Coordinate
 function routeStreetPaths(
   streetsById: Map<string, { path: Coordinate[] }>,
   connection: FlowConnection,
+  flowId?: string,
 ): Coordinate[][] {
-  if (!streetsById.size || !connection.streetIds.length || !connection.streetDirections.length) {
-    return [connection.path];
+  const hasFlowRoute = flowId !== undefined && Object.prototype.hasOwnProperty.call(connection.flowStreetIds, flowId);
+  const streetIds = hasFlowRoute ? connection.flowStreetIds[flowId!] : connection.streetIds;
+  const streetDirections = hasFlowRoute ? connection.flowStreetDirections[flowId!] : connection.streetDirections;
+  if (!streetIds?.length || streetIds.length !== streetDirections?.length || !streetsById.size) {
+    return [];
   }
-  return connection.streetIds.map((streetId, index) => {
+  const paths: Coordinate[][] = [];
+  for (const [index, streetId] of streetIds.entries()) {
     const street = streetsById.get(streetId);
-    if (!street) return connection.path;
-    return connection.streetDirections[index] === "reverse"
-      ? [...street.path].reverse()
-      : street.path;
-  });
+    if (!street?.path || street.path.length < 2) return [];
+    paths.push(streetDirections[index] === "reverse" ? [...street.path].reverse() : street.path);
+  }
+  return paths;
+}
+
+function joinRoutePaths(paths: Coordinate[][]): Coordinate[] | null {
+  return paths.reduce<Coordinate[] | null>((joined, path) => {
+    if (joined === null) return null;
+    if (!joined.length) return [...path];
+    const start = path[0];
+    const last = joined[joined.length - 1];
+    const beginsAtLast = start[0] === last[0] && start[1] === last[1];
+    return beginsAtLast ? [...joined, ...path.slice(1)] : null;
+  }, []);
+}
+
+function routeStreetIdsForFlow(connection: FlowConnection, flowId: string): string[] {
+  if (Object.prototype.hasOwnProperty.call(connection.flowStreetIds, flowId)) {
+    return connection.flowStreetIds[flowId];
+  }
+  return connection.streetIds;
 }
 
 function snapshotFlow(snapshot: SnapshotState, connectionId: string, flowId: string): {
@@ -564,7 +1149,7 @@ function aggregatePhysicalRoads(
   vehicleId: string | null,
 ): TownFlowRoad[] {
   if (!bundle.town_skeleton) return routes;
-  const streets = new Map(bundle.town_skeleton.streets.map((street) => [street.id, street]));
+  const streets = townStreetsById(bundle);
   const streetSnapshots = snapshot.schema_version === 2 ? snapshot.streets : undefined;
   const hasExactStreetData = Boolean(streetSnapshots && Object.keys(streetSnapshots).length);
   const dominantLoads = new Map<string, number>();
@@ -578,6 +1163,7 @@ function aggregatePhysicalRoads(
       name: street.kind,
       kind: "flow-road",
       path: street.path,
+      width: street.width,
       routeCount: 0,
       peopleRatio: 0,
       vehicleRatio: 0,
@@ -591,12 +1177,20 @@ function aggregatePhysicalRoads(
       peopleReverse: people?.reverse_in_transit ?? 0,
       vehicleForward: vehicle?.forward_in_transit ?? 0,
       vehicleReverse: vehicle?.reverse_in_transit ?? 0,
+      roadKind: street.kind,
+      pedestrianAccess: street.pedestrian_access !== false,
+      vehicleAccess: street.vehicle_access !== false,
     });
   }
 
   routes.forEach((route, index) => {
     const load = route.peopleCount + route.vehicleCount;
-    for (const streetId of new Set(connections[index].streetIds)) {
+    const connection = connections[index];
+    const routeStreetIds = [
+      ...connection.streetIds,
+      ...Object.values(connection.flowStreetIds).flat(),
+    ];
+    for (const streetId of new Set(routeStreetIds)) {
       const road = aggregated.get(streetId);
       if (!road) continue;
       road.routeCount += 1;
@@ -617,6 +1211,48 @@ function aggregatePhysicalRoads(
     }
   });
 
+  // Walkways are part of the rendered street fabric even though legacy flow
+  // snapshots only contain graph-edge counters. Use the local population bound
+  // to each district as a low-intensity pedestrian/vehicle density fallback so
+  // those visible gaps are represented in the heat layer as well.
+  for (const [locationId, walkways] of walkwaysByLocation(bundle)) {
+    if (!snapshot.location_counts[locationId]) continue;
+    const localPeople = peopleId ? snapshot.location_counts[locationId]?.[peopleId] ?? 0 : 0;
+    const localVehicles = vehicleId ? snapshot.location_counts[locationId]?.[vehicleId] ?? 0 : 0;
+    for (const walkway of walkways) {
+      const peopleCount = walkway.pedestrian_access ? Math.max(0, Math.round(localPeople / walkways.length)) : 0;
+      const vehicleCount = walkway.vehicle_access && walkway.width >= 3
+        ? Math.max(0, Math.round(localVehicles / walkways.length))
+        : 0;
+      if (peopleCount <= 0 && vehicleCount <= 0) continue;
+      aggregated.set(walkway.id, {
+        id: walkway.id,
+        name: "建筑间步道",
+        kind: "flow-road",
+        path: walkway.path,
+        width: walkway.width,
+        routeCount: 0,
+        peopleRatio: 0,
+        vehicleRatio: 0,
+        peopleCount,
+        vehicleCount,
+        peopleEntered: 0,
+        vehicleEntered: 0,
+        peopleExited: 0,
+        vehicleExited: 0,
+        peopleForward: Math.ceil(peopleCount / 2),
+        peopleReverse: Math.floor(peopleCount / 2),
+        vehicleForward: Math.ceil(vehicleCount / 2),
+        vehicleReverse: Math.floor(vehicleCount / 2),
+        roadKind: "walkway",
+        pedestrianAccess: walkway.pedestrian_access,
+        vehicleAccess: walkway.vehicle_access,
+        localEstimate: true,
+        sourceId: locationId,
+      });
+    }
+  }
+
   const roads = [...aggregated.values()];
   const peopleMax = Math.max(1, ...roads.map((road) => road.peopleCount));
   const vehicleMax = Math.max(1, ...roads.map((road) => road.vehicleCount));
@@ -627,37 +1263,160 @@ function aggregatePhysicalRoads(
   return roads;
 }
 
-function markerPolygon(position: Coordinate, size: number, angle: number): Coordinate[] {
-  return [0, 1, 2, 3].map((index) => {
-    const theta = angle + Math.PI / 4 + index * Math.PI / 2;
-    return [position[0] + Math.cos(theta) * size, position[1] + Math.sin(theta) * size];
-  });
+function arrowPolygon(position: Coordinate, size: number, angle: number): Coordinate[] {
+  const tip: Coordinate = [position[0] + Math.cos(angle) * size, position[1] + Math.sin(angle) * size];
+  const wingAngle = 2.4;
+  const wingScale = 0.65;
+  const left: Coordinate = [
+    position[0] + Math.cos(angle + wingAngle) * size * wingScale,
+    position[1] + Math.sin(angle + wingAngle) * size * wingScale,
+  ];
+  const right: Coordinate = [
+    position[0] + Math.cos(angle - wingAngle) * size * wingScale,
+    position[1] + Math.sin(angle - wingAngle) * size * wingScale,
+  ];
+  return [tip, left, right];
+}
+
+function diamondPolygon(position: Coordinate, size: number): Coordinate[] {
+  const [x, y] = position;
+  return [
+    [x, y + size],
+    [x + size, y],
+    [x, y - size],
+    [x - size, y],
+  ];
+}
+
+function rayEdgeIntersection(
+  rayOrigin: Coordinate,
+  rayDir: Coordinate,
+  edgeStart: Coordinate,
+  edgeEnd: Coordinate,
+): number | null {
+  const [x1, y1] = rayOrigin;
+  const [x2, y2] = [rayOrigin[0] + rayDir[0], rayOrigin[1] + rayDir[1]];
+  const [x3, y3] = edgeStart;
+  const [x4, y4] = edgeEnd;
+  const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+  if (Math.abs(denom) < 0.0001) return null;
+  const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+  const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom;
+  if (t >= 0 && u >= 0 && u <= 1) return t;
+  return null;
+}
+
+function buildingBoundaryIntersection(
+  center: Coordinate,
+  approachDir: Coordinate,
+  buildings: { polygon: Coordinate[] }[],
+): { point: Coordinate; distance: number } | null {
+  let best: { point: Coordinate; distance: number } | null = null;
+  for (const building of buildings) {
+    const poly = building.polygon;
+    for (let i = 0; i < poly.length; i += 1) {
+      const start = poly[i];
+      const end = poly[(i + 1) % poly.length];
+      const t = rayEdgeIntersection(center, approachDir, start, end);
+      if (t !== null && (best === null || t < best.distance)) {
+        best = { point: [center[0] + approachDir[0] * t, center[1] + approachDir[1] * t], distance: t };
+      }
+    }
+  }
+  return best;
+}
+
+function stableUnit(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+  }
+  return (hash >>> 0) / 0xffffffff;
+}
+
+function selectDistributedMarkers(candidates: MarkerCandidate[], limit: number): FlowMarker[] {
+  const ordered = [...candidates].sort(
+    (left, right) => right.weight - left.weight || left.id.localeCompare(right.id),
+  );
+  const selected: MarkerCandidate[] = [];
+  const groups = new Map<string, MarkerCandidate[]>();
+  for (const candidate of ordered) {
+    const key = candidate.coverageId ?? candidate.sourceId;
+    const group = groups.get(key) ?? [];
+    group.push(candidate);
+    groups.set(key, group);
+  }
+  const queues = [...groups.values()].sort(
+    (left, right) => right[0].weight - left[0].weight || left[0].id.localeCompare(right[0].id),
+  );
+  while (selected.length < limit) {
+    let added = false;
+    for (const queue of queues) {
+      const candidate = queue.shift();
+      if (!candidate) continue;
+      selected.push(candidate);
+      added = true;
+      if (selected.length >= limit) break;
+    }
+    if (!added) break;
+  }
+  return selected.map(({ weight: _weight, coverageId: _coverageId, ...marker }) => marker);
+}
+
+function adaptiveMarkerLimit(
+  candidates: MarkerCandidate[],
+  minimum: number,
+  maximum: number,
+  extraPerCoverage: number,
+): number {
+  const coverageCount = new Set(
+    candidates.map((candidate) => candidate.coverageId ?? candidate.sourceId),
+  ).size;
+  return Math.min(maximum, Math.max(minimum, Math.ceil(coverageCount * (1 + extraPerCoverage))));
+}
+
+function routeMarkerSampleCount(flow: "people" | "vehicle", count: number): number {
+  if (flow === "vehicle") {
+    return count >= 10 ? 4 : count >= 3 ? 3 : 2;
+  }
+  return count >= 80 ? 4 : count >= 20 ? 3 : count >= 5 ? 2 : 1;
+}
+
+function pathLength(path: Coordinate[]): number {
+  return path.slice(1).reduce(
+    (total, point, index) => total + Math.hypot(point[0] - path[index][0], point[1] - path[index][1]),
+    0,
+  );
 }
 
 function flowLocations(bundle: ScenarioBundle): Array<{ id: string; name: string; position: Coordinate }> {
-  return (bundle.simulation_package?.locations ?? bundle.config.locations).map((location) => ({
+  const cached = flowLocationCache.get(bundle);
+  if (cached) return cached;
+  const result = (bundle.simulation_package?.locations ?? bundle.config.locations).map((location) => ({
     id: location.id,
     name: location.name,
     position: location.position,
   }));
+  flowLocationCache.set(bundle, result);
+  return result;
 }
 
 export function assembleTownFlowData(
   bundle: ScenarioBundle,
   snapshot: SnapshotState,
   tickProgress = snapshot.tick,
+  markerDensity = 1,
 ): TownFlowRenderData {
   const { people, vehicle } = flowIds(bundle);
   const connections = flowConnections(bundle);
   const roads: TownFlowRoad[] = [];
-  const peopleMarkers: FlowMarker[] = [];
-  const vehicleMarkers: FlowMarker[] = [];
+  const peopleCandidates: MarkerCandidate[] = [];
+  const vehicleCandidates: MarkerCandidate[] = [];
+  const localPeopleCandidates: MarkerCandidate[] = [];
+  const localVehicleCandidates: MarkerCandidate[] = [];
   const locationEntries = flowLocations(bundle);
   const locationNames = new Map(locationEntries.map((location) => [location.id, location.name]));
-  const streetsById = new Map(
-    (bundle.town_skeleton?.streets ?? []).map((street) => [street.id, street]),
-  );
-
+  const streetsById = townStreetsById(bundle);
   for (const connection of connections) {
     const peopleFlow = people
       ? snapshotFlow(snapshot, connection.id, people)
@@ -693,25 +1452,37 @@ export function assembleTownFlowData(
       count: number,
       streetCounts: number[],
       travelTime: number,
-      target: FlowMarker[],
+      target: MarkerCandidate[],
     ) => {
       const fromName = locationNames.get(connection.fromLocationId) ?? connection.fromLocationId;
       const toName = locationNames.get(connection.toLocationId) ?? connection.toLocationId;
-      const exactStreetCounts = streetCounts.length === connection.streetIds.length;
-      const paths = exactStreetCounts ? routeStreetPaths(streetsById, connection) : [connection.path];
-      const counts = exactStreetCounts ? streetCounts : [count];
+      const routeFlowId = flow === "vehicle" ? vehicle ?? "vehicle" : people ?? "pedestrian";
+      const routeStreetIds = routeStreetIdsForFlow(connection, routeFlowId);
+      const paths = bundle.town_skeleton
+        ? routeStreetPaths(streetsById, connection, routeFlowId)
+        : connection.path.length >= 2 ? [connection.path] : [];
+      if (!paths.length || count <= 0) return;
+      const exactStreetCounts = streetCounts.length === routeStreetIds.length && routeStreetIds.length > 0;
+      const totalPathLength = Math.max(0.001, paths.reduce((total, path) => total + pathLength(path), 0));
+      const counts = exactStreetCounts
+        ? streetCounts
+        : paths.map((path) => count * pathLength(path) / totalPathLength);
+      const markerPaths = paths;
       for (const [streetIndex, streetCount] of counts.entries()) {
-        if (streetCount <= 0 || target.length >= (flow === "vehicle" ? 600 : 1_200)) continue;
-        const markerCount = Math.min(
-          flow === "vehicle" ? 1 : 2,
-          Math.max(1, Math.ceil(streetCount / (flow === "vehicle" ? 2 : 18))),
-        );
-        const path = paths[streetIndex] ?? connection.path;
-        for (let index = 0; index < markerCount; index += 1) {
-          const progress = (tickProgress / Math.max(1, travelTime) + index / markerCount) % 1;
-          const point = pathPoint(path, progress);
+        if (streetCount <= 0) continue;
+        const path = markerPaths[streetIndex];
+        if (!path || path.length < 2) continue;
+        const coverageId = exactStreetCounts
+          ? routeStreetIds[streetIndex] ?? connection.id
+          : connection.id;
+        const sampleCount = routeMarkerSampleCount(flow, streetCount);
+        const baseProgress = tickProgress / Math.max(1, travelTime)
+          + stableUnit(`${connection.id}-${flow}-${streetIndex}`);
+        for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += 1) {
+          const id = `${connection.id}-${flow}-${streetIndex}-${sampleIndex}`;
+          const point = pathPoint(path, (baseProgress + sampleIndex / sampleCount) % 1);
           target.push({
-            id: `${connection.id}-${flow}-${streetIndex}-${index}`,
+            id,
             name: `${flow === "vehicle" ? "车流" : "人流"}\n出发点：${fromName}\n终点：${toName}\n当前街段在途：${Math.round(streetCount).toLocaleString("zh-CN")}\n当前路线在途：${Math.round(count).toLocaleString("zh-CN")}`,
             kind: flow,
             position: point.position,
@@ -720,7 +1491,12 @@ export function assembleTownFlowData(
             sourceId: connection.id,
             fromName,
             toName,
-            polygon: flow === "vehicle" ? markerPolygon(point.position, 3.8, point.angle) : undefined,
+            weight: streetCount / sampleCount,
+            coverageId,
+            polygon: flow === "vehicle"
+              ? arrowPolygon(point.position, 7, point.angle)
+              : diamondPolygon(point.position, 4),
+            angle: point.angle,
           });
         }
       }
@@ -731,7 +1507,7 @@ export function assembleTownFlowData(
         peopleFlow.inTransit,
         peopleFlow.streetInTransit,
         connection.travelTime[people] ?? 1,
-        peopleMarkers,
+        peopleCandidates,
       );
     }
     if (vehicle) {
@@ -740,35 +1516,159 @@ export function assembleTownFlowData(
         vehicleFlow.inTransit,
         vehicleFlow.streetInTransit,
         connection.travelTime[vehicle] ?? 1,
-        vehicleMarkers,
+        vehicleCandidates,
       );
     }
   }
+
+  for (const [locationId, walkways] of walkwaysByLocation(bundle)) {
+    const locationName = locationNames.get(locationId) ?? locationId;
+    const localPeople = people ? snapshot.location_counts[locationId]?.[people] ?? 0 : 0;
+    const localVehicles = vehicle ? snapshot.location_counts[locationId]?.[vehicle] ?? 0 : 0;
+    for (const walkway of walkways) {
+      const path = walkway.path.length > 1
+        ? [...walkway.path, ...walkway.path.slice(0, -1).reverse()]
+        : walkway.path;
+      const duration = Math.max(6, pathLength(path) / 1.2);
+      if (walkway.pedestrian_access && localPeople > 0) {
+        const id = `${walkway.id}-local-people`;
+        const point = pathPoint(path, tickProgress / duration + stableUnit(id));
+        const count = Math.max(1, Math.round(localPeople / walkways.length));
+        localPeopleCandidates.push({
+          id,
+          name: `街区内部人流\n区域：${locationName}\n步道宽度：${walkway.width.toFixed(1)} 米\n附近人数：${count.toLocaleString("zh-CN")}`,
+          kind: "people",
+          position: point.position,
+          path,
+          flow: "people",
+          sourceId: locationId,
+          fromName: locationName,
+          toName: locationName,
+          weight: localPeople / walkways.length,
+          polygon: diamondPolygon(point.position, 3.5),
+          angle: point.angle,
+        });
+      }
+      if (walkway.vehicle_access && walkway.width >= 3 && localVehicles > 0) {
+        const id = `${walkway.id}-local-vehicle`;
+        const point = pathPoint(path, tickProgress / Math.max(6, pathLength(path) / 2.5) + stableUnit(id));
+        const count = Math.max(1, Math.round(localVehicles / walkways.length));
+        localVehicleCandidates.push({
+          id,
+          name: `街区内部车流\n区域：${locationName}\n道路宽度：${walkway.width.toFixed(1)} 米\n附近车辆：${count.toLocaleString("zh-CN")}`,
+          kind: "vehicle",
+          position: point.position,
+          path,
+          flow: "vehicle",
+          sourceId: locationId,
+          fromName: locationName,
+          toName: locationName,
+          weight: localVehicles / walkways.length,
+          polygon: arrowPolygon(point.position, 5.5, point.angle),
+          angle: point.angle,
+        });
+      }
+    }
+  }
+
   const physicalRoads = aggregatePhysicalRoads(bundle, roads, connections, snapshot, people, vehicle);
-  return { roads: physicalRoads, peopleMarkers, vehicleMarkers };
+  const density = Math.min(2.5, Math.max(0.25, markerDensity));
+  const selectedRoutePeople = selectDistributedMarkers(
+    peopleCandidates,
+    Math.round(adaptiveMarkerLimit(peopleCandidates, 72, 420, 0.75) * density),
+  );
+  const selectedRouteVehicles = selectDistributedMarkers(
+    vehicleCandidates,
+    Math.round(adaptiveMarkerLimit(vehicleCandidates, 36, 260, 0.5) * density),
+  );
+  const selectedLocalPeople = selectDistributedMarkers(
+    localPeopleCandidates,
+    Math.round(adaptiveMarkerLimit(localPeopleCandidates, 72, 180, 2) * density),
+  );
+  const selectedLocalVehicles = selectDistributedMarkers(
+    localVehicleCandidates,
+    Math.round(adaptiveMarkerLimit(localVehicleCandidates, 12, 48, 1) * density),
+  );
+  return {
+    roads: physicalRoads,
+    peopleMarkers: [...selectedRoutePeople, ...selectedLocalPeople],
+    vehicleMarkers: [...selectedRouteVehicles, ...selectedLocalVehicles],
+  };
 }
 
-function heatRoadLayer(
-  id: string,
-  data: TownFlowRoad[],
-  flow: "people" | "vehicle",
-): Layer {
-  return new PathLayer<TownFlowRoad>({
+function lerpHeatColor(ratio: number, low: number[], middle: number[], high: number[], alphaBase: number, alphaRange: number): Color {
+  const left = ratio < 0.55 ? low : middle;
+  const right = ratio < 0.55 ? middle : high;
+  const progress = ratio < 0.55 ? ratio / 0.55 : (ratio - 0.55) / 0.45;
+  return [
+    Math.round(left[0] + (right[0] - left[0]) * progress),
+    Math.round(left[1] + (right[1] - left[1]) * progress),
+    Math.round(left[2] + (right[2] - left[2]) * progress),
+    alphaBase + Math.round(alphaRange * ratio),
+  ];
+}
+
+// People heat: warm gradient (green → amber → red)
+function peopleHeatColor(ratio: number): Color {
+  return lerpHeatColor(ratio, [85, 205, 183], [243, 196, 93], [255, 107, 94], 105, 140);
+}
+
+// Vehicle heat: cool gradient (sky blue → violet → magenta)
+function vehicleHeatColor(ratio: number): Color {
+  return lerpHeatColor(ratio, [87, 167, 255], [140, 110, 210], [220, 80, 160], 110, 130);
+}
+
+// People heat (pearl theme)
+function peopleHeatPearl(ratio: number): Color {
+  return lerpHeatColor(ratio, [74, 143, 176], [196, 152, 61], [184, 74, 58], 120, 125);
+}
+
+// Vehicle heat (pearl theme)
+function vehicleHeatPearl(ratio: number): Color {
+  return lerpHeatColor(ratio, [60, 120, 170], [128, 88, 168], [180, 60, 132], 125, 120);
+}
+
+function directionalRoadData(roads: TownFlowRoad[], flow: FlowAnalysisMode): DirectionalRoad[] {
+  const counts = roads.map((road) => flow === "people"
+    ? road.peopleForward + road.peopleReverse
+    : road.vehicleForward + road.vehicleReverse);
+  const maximum = Math.max(1, ...counts);
+  return roads.flatMap((road): DirectionalRoad[] => {
+    const forward = flow === "people" ? road.peopleForward : road.vehicleForward;
+    const reverse = flow === "people" ? road.peopleReverse : road.vehicleReverse;
+    const count = forward + reverse;
+    if (count <= 0) return [];
+    const direction = forward >= reverse ? "forward" : "reverse";
+    return [{
+      id: `${road.id}-${flow}-${direction}`,
+      path: direction === "forward" ? road.path : [...road.path].reverse(),
+      direction,
+      count,
+      ratio: count / maximum,
+    }];
+  });
+}
+
+
+function heatColorByTheme(ratio: number, flow: FlowAnalysisMode, theme: "pearl" | "night"): Color {
+  if (theme === "pearl") {
+    return flow === "vehicle" ? vehicleHeatPearl(ratio) : peopleHeatPearl(ratio);
+  }
+  return flow === "vehicle" ? vehicleHeatColor(ratio) : peopleHeatColor(ratio);
+}
+
+function heatRoadLayer(id: string, data: DirectionalRoad[], flow: FlowAnalysisMode, theme: "pearl" | "night", modelMatrix?: Float32Array): Layer {
+  return new PathLayer<DirectionalRoad>({
     id,
     data,
     coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
+    ...(modelMatrix ? { modelMatrix } : {}),
     widthUnits: "pixels",
     capRounded: true,
     jointRounded: true,
     getPath: (road) => road.path,
-    getColor: (road) => {
-      const ratio = flow === "people" ? road.peopleRatio : road.vehicleRatio;
-      if (ratio <= 0) return [0, 0, 0, 0];
-      return flow === "people"
-        ? [36 + Math.round(189 * ratio), 196 - Math.round(121 * ratio), 187 - Math.round(122 * ratio), 45 + Math.round(155 * ratio)]
-        : [42 + Math.round(189 * ratio), 165 - Math.round(93 * ratio), 221 - Math.round(108 * ratio), 40 + Math.round(155 * ratio)];
-    },
-    getWidth: (road) => 6 + (flow === "people" ? road.peopleRatio : road.vehicleRatio) * 10,
+    getColor: (road) => heatColorByTheme(road.ratio, flow, theme),
+    getWidth: (road) => 2 + Math.sqrt(road.ratio) * 7,
     pickable: false,
   });
 }
@@ -779,12 +1679,90 @@ export function createDynamicTownLayers(
   selectedFeatureId: string | null,
   tickProgress?: number,
   visibility: TownLayerVisibility = allLayersVisible,
+  analysisFlow: FlowAnalysisMode = "people",
+  hoveredObject: TownFeature | null = null,
+  modelMatrix?: Float32Array,
+  theme: "pearl" | "night" = "night",
+  markerDensity = 1,
 ): Layer[] {
   if (!snapshot) return [];
-  const data = assembleTownFlowData(bundle, snapshot, tickProgress ?? snapshot.tick);
-  const common = { coordinateSystem: COORDINATE_SYSTEM.CARTESIAN } as const;
+  const mc = theme === "pearl" ? pearlMapColors : mapColors;
+  const data = assembleTownFlowData(bundle, snapshot, tickProgress ?? snapshot.tick, markerDensity);
+  const directions = directionalRoadData(data.roads, analysisFlow);
+  const common = { coordinateSystem: COORDINATE_SYSTEM.CARTESIAN, ...(modelMatrix ? { modelMatrix } : {}) } as const;
+  const streetsById = townStreetsById(bundle);
+  const { people: peopleFlowId, vehicle: vehicleFlowId } = flowIds(bundle);
+
+  const hoveredFlowMarker =
+    hoveredObject && (hoveredObject.kind === "people" || hoveredObject.kind === "vehicle")
+      ? hoveredObject as FlowMarker
+      : null;
+  let hoverRoutePath: Coordinate[] | null = null;
+  let hoverStartPoint: Coordinate | null = null;
+  let hoverEndPoint: Coordinate | null = null;
+  let hoverEndAngle = 0;
+  if (hoveredFlowMarker) {
+    const sourceId = (hoveredFlowMarker as FlowMarker & { sourceId?: string }).sourceId;
+    let toLocationId: string | null = null;
+    if (sourceId) {
+      const conn = flowConnections(bundle).find((c) => c.id === sourceId);
+      if (conn) {
+        const hoverFlowId = hoveredFlowMarker.flow === "vehicle" ? vehicleFlowId : peopleFlowId;
+        const streetPaths = hoverFlowId ? routeStreetPaths(streetsById, conn, hoverFlowId) : [];
+        hoverRoutePath = streetPaths.length ? joinRoutePaths(streetPaths) : null;
+        toLocationId = conn.toLocationId;
+      }
+    }
+    if (!hoverRoutePath) {
+      const markerPath = (hoveredFlowMarker as FlowMarker & { path?: Coordinate[] }).path;
+      hoverRoutePath = markerPath ? [...markerPath] : null;
+    }
+    if (hoverRoutePath && hoverRoutePath.length >= 2) {
+      hoverStartPoint = hoverRoutePath[0];
+      const rawEnd = hoverRoutePath[hoverRoutePath.length - 1];
+      const secondLast = hoverRoutePath[hoverRoutePath.length - 2];
+      const dx = rawEnd[0] - secondLast[0];
+      const dy = rawEnd[1] - secondLast[1];
+      const approachLen = Math.hypot(dx, dy);
+      const approachDir: Coordinate = dx === 0 && dy === 0 ? [0, -1] : [dx / approachLen, dy / approachLen];
+      hoverEndAngle = Math.atan2(dy, dx);
+
+      // Find building boundary intersection for the destination
+      let edgePoint: Coordinate = rawEnd;
+      if (toLocationId) {
+        const bindings = bundle.simulation_package?.bindings;
+        const townSkeleton = bundle.town_skeleton;
+        if (bindings && townSkeleton) {
+          const featureIds = bindings.location_feature_ids[toLocationId] ?? [];
+          const targetBuildings = townSkeleton.buildings.filter((b) => featureIds.includes(b.id));
+          if (targetBuildings.length > 0) {
+            // Shoot ray from center opposite to approach direction (backwards)
+            const backDir: Coordinate = [-approachDir[0], -approachDir[1]];
+            const hit = buildingBoundaryIntersection(rawEnd, backDir, targetBuildings);
+            if (hit) {
+              edgePoint = hit.point;
+              // Trim the last path point to stop at the building edge
+              hoverRoutePath = [
+                ...hoverRoutePath.slice(0, -1),
+                edgePoint,
+              ];
+            }
+          }
+        }
+      }
+      hoverEndPoint = edgePoint;
+    }
+  }
+
+  const hoverRouteColor: Color =
+    hoveredFlowMarker?.flow === "vehicle"
+      ? [mc.vehicle[0], mc.vehicle[1], mc.vehicle[2], 140] as Color
+      : [mc.people[0], mc.people[1], mc.people[2], 160] as Color;
+
+  const dashedExtension = new PathStyleExtension({ dash: true });
+
   return [
-    ...(visibility.roads || visibility.people || visibility.vehicles ? [new PathLayer<TownFlowRoad>({
+    ...(visibility.roads || visibility.people || visibility.vehicles || visibility.heat ? [new PathLayer<TownFlowRoad>({
       id: "flow-road-hit-target",
       data: data.roads,
       ...common,
@@ -794,46 +1772,21 @@ export function createDynamicTownLayers(
       jointRounded: true,
       getPath: (road) => road.path,
       getColor: [0, 0, 0, 0],
-      getWidth: 12,
+      getWidth: 14,
     })] : []),
-    ...(visibility.heat && visibility.people ? [heatRoadLayer("people-heat", data.roads, "people")] : []),
-    ...(visibility.heat && visibility.vehicles ? [heatRoadLayer("vehicle-heat", data.roads, "vehicle")] : []),
-    ...(visibility.people ? [new PathLayer<TownFlowRoad>({
-      id: "people-flow-roads",
-      data: data.roads,
-      ...common,
-      widthUnits: "pixels",
-      capRounded: true,
-      jointRounded: true,
-      getPath: (road) => road.path!,
-      pickable: false,
-      getColor: (road) => [47 + Math.round(145 * road.peopleRatio), 117 - Math.round(48 * road.peopleRatio), 111 - Math.round(42 * road.peopleRatio), road.peopleRatio > 0 ? 105 + Math.round(110 * road.peopleRatio) : 0],
-      getWidth: (road) => 2 + road.peopleRatio * 5,
-    })] : []),
-    ...(visibility.vehicles ? [new PathLayer<TownFlowRoad>({
-      id: "vehicle-flow-roads",
-      data: data.roads,
-      ...common,
-      widthUnits: "pixels",
-      capRounded: true,
-      jointRounded: true,
-      getPath: (road) => road.path!,
-      pickable: false,
-      getColor: (road) => [73 + Math.round(155 * road.vehicleRatio), 124 - Math.round(65 * road.vehicleRatio), 166 - Math.round(72 * road.vehicleRatio), road.vehicleRatio > 0 ? 100 + Math.round(120 * road.vehicleRatio) : 0],
-      getWidth: (road) => 1.5 + road.vehicleRatio * 4,
-    })] : []),
+    ...(visibility.heat ? [heatRoadLayer(`${analysisFlow}-direction-heat`, directions, analysisFlow, theme, modelMatrix)] : []),
     ...(visibility.people ? [new ScatterplotLayer<FlowMarker>({
       id: "people-flow-markers",
       data: data.peopleMarkers,
       ...common,
       pickable: true,
-      radiusUnits: "pixels",
-      stroked: true,
+      radiusUnits: "pixels" as const,
       getPosition: (marker) => marker.position,
-      getRadius: () => 3.2,
-      getFillColor: (marker) => marker.id.startsWith(`${selectedFeatureId ?? "!"}-`) ? [181, 106, 63, 255] : [47, 117, 111, 235],
-      getLineColor: [237, 233, 222, 240],
+      getRadius: 3,
+      getFillColor: (marker) => marker.id.startsWith(`${selectedFeatureId ?? "!"}-`) ? mc.selection : mc.people,
+      getLineColor: [16, 20, 22, 200],
       getLineWidth: 1,
+      stroked: true,
     })] : []),
     ...(visibility.vehicles ? [new PolygonLayer<FlowMarker>({
       id: "vehicle-flow-markers",
@@ -842,10 +1795,55 @@ export function createDynamicTownLayers(
       pickable: true,
       stroked: true,
       filled: true,
-      getPolygon: (marker) => marker.polygon!,
-      getFillColor: (marker) => marker.id.startsWith(`${selectedFeatureId ?? "!"}-`) ? [181, 106, 63, 255] : [73, 124, 166, 245],
-      getLineColor: [237, 233, 222, 240],
+      getPolygon: (marker) => marker.polygon,
+      getFillColor: (marker) => marker.id.startsWith(`${selectedFeatureId ?? "!"}-`) ? mc.selection : mc.vehicle,
+      getLineColor: [16, 20, 22, 245],
       getLineWidth: 1,
+    })] : []),
+    ...(hoverRoutePath ? [new PathLayer({
+      id: "hover-route-line",
+      data: [{ path: hoverRoutePath }],
+      coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
+      ...(modelMatrix ? { modelMatrix } : {}),
+      widthUnits: "pixels" as const,
+      capRounded: true,
+      jointRounded: true,
+      getPath: (d: unknown) => (d as { path: Coordinate[] }).path,
+      getColor: hoverRouteColor,
+      getWidth: 2,
+      // PathStyleExtension props
+      getDashArray: [5, 4],
+      dashJustified: true,
+      dashGapPickable: false,
+      pickable: false,
+      extensions: [dashedExtension],
+    })] : []),
+    ...(hoverStartPoint ? [new ScatterplotLayer<{ position: Coordinate }>({
+      id: "hover-route-start",
+      data: [{ position: hoverStartPoint }],
+      coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
+      ...(modelMatrix ? { modelMatrix } : {}),
+      radiusUnits: "pixels",
+      getPosition: (d: unknown) => (d as { position: Coordinate }).position,
+      getRadius: 3,
+      getFillColor: hoverRouteColor,
+      getLineColor: [16, 20, 22, 200],
+      getLineWidth: 1,
+      stroked: true,
+      pickable: false,
+    })] : []),
+    ...(hoverEndPoint ? [new PolygonLayer<{ polygon: Coordinate[] }>({
+      id: "hover-route-end",
+      data: [{ polygon: arrowPolygon(hoverEndPoint, 3, hoverEndAngle) }],
+      coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
+      ...(modelMatrix ? { modelMatrix } : {}),
+      getPolygon: (d: unknown) => (d as { polygon: Coordinate[] }).polygon,
+      getFillColor: hoverRouteColor,
+      getLineColor: [16, 20, 22, 200],
+      getLineWidth: 1,
+      stroked: true,
+      filled: true,
+      pickable: false,
     })] : []),
   ];
 }

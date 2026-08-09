@@ -6,7 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from app.models import TownGenerationRequest
-from app.town import generate_town, town_skeleton_checksum
+from app.town import BOUNDARY_POINTS, generate_town, town_skeleton_checksum
+from app.watabou_importer import generate_watabou_town
 
 
 def test_same_request_generates_identical_town() -> None:
@@ -32,13 +33,23 @@ def test_different_seed_changes_geometry() -> None:
 
     assert first.boundary != second.boundary
     assert first.scenario_id != second.scenario_id
-    assert first.name == "Town-1"
+    assert first.name != "Town-1"  # no longer falls back to Town-{seed}
+
+
+@pytest.mark.parametrize(
+    ("size", "suffix"),
+    [("village", "村"), ("town", "镇"), ("city", "城")],
+)
+@pytest.mark.parametrize("generator", [generate_town, generate_watabou_town])
+def test_generated_name_matches_settlement_scale(generator, size: str, suffix: str) -> None:
+    town = generator(TownGenerationRequest(generation_seed=42, population=1000, generation_size=size))
+    assert town.name.endswith(suffix)
 
 
 def test_generated_town_has_complete_geometry_and_function_types() -> None:
     town = generate_town(TownGenerationRequest(generation_seed=42, population=12000))
 
-    assert len(town.boundary) == 16
+    assert len(town.boundary) == BOUNDARY_POINTS
     assert sum(junction.kind == "gate" for junction in town.junctions) == 4
     assert {building.kind for building in town.buildings} >= {
         "residential",
@@ -62,8 +73,14 @@ def test_generated_town_has_complete_geometry_and_function_types() -> None:
         "stable",
     }
     junctions = {junction.id: junction for junction in town.junctions}
-    assert all(street.path[0] == junctions[street.from_junction_id].position for street in town.streets)
-    assert all(street.path[-1] == junctions[street.to_junction_id].position for street in town.streets)
+    assert all(
+        street.kind == "alley" or street.path[0] == junctions[street.from_junction_id].position
+        for street in town.streets
+    )
+    assert all(
+        street.kind == "alley" or street.path[-1] == junctions[street.to_junction_id].position
+        for street in town.streets
+    )
 
 
 def test_large_population_respects_geometry_cap() -> None:

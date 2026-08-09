@@ -17,6 +17,7 @@ from .models import (
 )
 from .scenario import LoadedScenario, canonical_json
 from .town import generate_town, town_skeleton_checksum
+from .watabou_importer import generate_watabou_town
 
 MAX_DRAFTS = 8
 
@@ -168,7 +169,10 @@ class DraftManager:
             self._prune_finished()
             if len(self._drafts) >= self.max_drafts:
                 raise DraftCapacityReached("draft capacity reached")
-            town = await asyncio.to_thread(generate_town, request)
+            if request.generator == "watabou-v1":
+                town = await asyncio.to_thread(generate_watabou_town, request)
+            else:
+                town = await asyncio.to_thread(generate_town, request)
             draft = ScenarioDraft(
                 id=f"draft-{uuid4().hex}",
                 town_skeleton=town,

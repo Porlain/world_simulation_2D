@@ -56,6 +56,8 @@ export interface ScenarioDraftRequest {
   generation_seed?: number;
   population: number;
   name?: string;
+  generator?: "radial-v1" | "watabou-v1";
+  generation_size?: "village" | "town" | "city";
 }
 
 export interface ScenarioDraft {
@@ -71,7 +73,8 @@ export interface ScenarioDraft {
 }
 
 export type DistrictKind = "residential" | "market" | "industrial" | "storage" | "religious" | "civic" | "military" | "stable";
-export type BuildingKind = "residential" | "market" | "workshop" | "storage" | "religious" | "administrative" | "military" | "stable";
+export type BuildingKind = "residential" | "market" | "workshop" | "storage" | "religious" | "administrative" | "military" | "stable" | "tavern" | "academy" | "hospital";
+export type CenterMonumentKind = "fountain" | "statue" | "obelisk" | "well" | "grand-tree";
 
 export interface TownDistrict {
   id: string;
@@ -99,13 +102,24 @@ export interface TownStreet {
   to_junction_id: string;
   path: Coordinate[];
   width: number;
-  kind: "primary" | "ring" | "secondary";
+  kind: "primary" | "ring" | "secondary" | "lane" | "alley";
+  pedestrian_access: boolean;
+  vehicle_access: boolean;
+}
+
+export interface TownWalkway {
+  id: string;
+  district_id: string;
+  path: Coordinate[];
+  width: number;
+  pedestrian_access: boolean;
+  vehicle_access: boolean;
 }
 
 export interface TownLandmark {
   id: string;
   building_id: string | null;
-  kind: "gate" | "plaza" | BuildingKind;
+  kind: "gate" | "plaza" | BuildingKind | CenterMonumentKind;
   name: string;
   position: Coordinate;
 }
@@ -115,7 +129,7 @@ export interface TownSkeleton {
   scenario_id: string;
   name: string;
   generation_seed: number;
-  generator_version: "radial-v1";
+  generator_version: "radial-v1" | "watabou-v1";
   requested_population: number;
   initial_vehicle_count: number;
   coordinate_system: "local_xy";
@@ -127,7 +141,9 @@ export interface TownSkeleton {
   buildings: TownBuilding[];
   junctions: TownJunction[];
   streets: TownStreet[];
+  walkways?: TownWalkway[];
   landmarks: TownLandmark[];
+  district_names: Record<string, string>;
 }
 
 export interface SimulationPackage {
@@ -138,6 +154,9 @@ export interface SimulationPackage {
   connections: Array<Omit<ConnectionConfig, "travel_time_ticks"> & {
     street_segment_ids: string[];
     street_directions?: Array<"forward" | "reverse">;
+    flow_street_segment_ids?: Record<string, string[]>;
+    flow_street_directions?: Record<string, Array<"forward" | "reverse">>;
+    flow_paths?: Record<string, Coordinate[]>;
     travel_time_ticks: Record<string, number>;
   }>;
   bindings: {
@@ -200,6 +219,7 @@ export type RunRate = 0.5 | 1 | 2 | 4;
 export interface RunRecord {
   id: string;
   scenario_id: string;
+  scenario_name?: string;
   scenario_schema_version: number;
   scenario_checksum: string;
   seed: number;
