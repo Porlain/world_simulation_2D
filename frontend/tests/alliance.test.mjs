@@ -20,7 +20,10 @@ test("alliance generation is deterministic and keeps its settlement hierarchy", 
   assert.ok(first.mountains.length >= 3);
   assert.ok(first.rivers.length >= 3);
   assert.ok(first.lakes.length >= 3);
-  assert.ok(first.landmasses.length >= 3);
+  assert.ok(first.landmasses.length >= 10);
+  assert.equal(first.regions.length, 5);
+  assert.ok(first.regions.every((region) => region.polygon.length >= 3));
+  assert.ok(first.regions.every((region) => first.settlements.some((settlement) => settlement.id === region.capitalId)));
 
   const byId = new Map(first.settlements.map((item) => [item.id, item]));
   for (const settlement of first.settlements.filter((item) => item.parentId)) {
@@ -51,12 +54,12 @@ test("alliance generation is deterministic and keeps its settlement hierarchy", 
         (distance, town) => Math.min(distance, Math.hypot(town.position[0] - corner[0], town.position[1] - corner[1])),
         Infinity,
       );
-    assert.ok(nearestBoundaryTown <= 135, `no boundary town near ${corner}`);
+    assert.ok(nearestBoundaryTown <= 250, `no boundary town near ${corner}`);
   }
   const xs = first.territory.map(([x]) => x);
   const ys = first.territory.map(([, y]) => y);
-  assert.ok(Math.max(...xs) - Math.min(...xs) <= 520);
-  assert.ok(Math.max(...ys) - Math.min(...ys) <= 500);
+  assert.ok(Math.max(...xs) - Math.min(...xs) <= 760);
+  assert.ok(Math.max(...ys) - Math.min(...ys) <= 600);
 });
 
 test("alliance roads meet only at declared settlements", () => {

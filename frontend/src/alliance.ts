@@ -26,6 +26,14 @@ export interface AllianceRoad {
   vehicles: number;
 }
 
+export interface AllianceRegion {
+  id: string;
+  name: string;
+  capitalId: string;
+  polygon: Coordinate[];
+  colorIndex: number;
+}
+
 export interface AllianceTerrainBand {
   id: string;
   label: string;
@@ -44,11 +52,12 @@ export interface AllianceModel {
   mountains: Coordinate[][];
   rivers: Coordinate[][];
   lakes: Coordinate[][];
+  regions: AllianceRegion[];
   settlements: AllianceSettlement[];
   roads: AllianceRoad[];
 }
 
-const BOUNDS: readonly [number, number, number, number] = [0, 0, 1600, 1000];
+const BOUNDS: readonly [number, number, number, number] = [0, 0, 3200, 1800];
 
 function stableUnit(seed: number, key: string): number {
   let hash = (seed ^ 0x811c9dc5) >>> 0;
@@ -66,16 +75,12 @@ const ALLIANCE_SOURCE_BOUNDS = { x0: 45, x1: 920, y0: 90, y1: 850 };
 type AlliancePlacementBounds = { x0: number; x1: number; y0: number; y1: number };
 
 function alliancePlacement(seed: number): AlliancePlacementBounds {
-  const width = 520;
-  const height = 500;
-  const marginX = 60;
-  const marginY = 50;
-  const x0 = marginX + Math.round(
-    stableUnit(seed, "alliance-placement-x") * (BOUNDS[2] - width - marginX * 2),
-  );
-  const y0 = marginY + Math.round(
-    stableUnit(seed, "alliance-placement-y") * (BOUNDS[3] - height - marginY * 2),
-  );
+  const width = 760;
+  const height = 600;
+  const centerX = 1600 + Math.round((stableUnit(seed, "alliance-placement-x") - 0.5) * 220);
+  const centerY = 900 + Math.round((stableUnit(seed, "alliance-placement-y") - 0.5) * 150);
+  const x0 = Math.max(820, Math.min(2240, centerX - width / 2));
+  const y0 = Math.max(520, Math.min(680, centerY - height / 2));
   return { x0, x1: x0 + width, y0, y1: y0 + height };
 }
 
@@ -83,14 +88,20 @@ function allianceTerritory(bounds: AlliancePlacementBounds): Coordinate[] {
   const width = bounds.x1 - bounds.x0;
   const height = bounds.y1 - bounds.y0;
   return [
-    point(bounds.x0 + width * 0.03, bounds.y0 + height * 0.03),
-    point(bounds.x0 + width * 0.67, bounds.y0),
-    point(bounds.x1 - width * 0.05, bounds.y0 + height * 0.16),
-    point(bounds.x1, bounds.y0 + height * 0.48),
-    point(bounds.x0 + width * 0.85, bounds.y1 - height * 0.14),
-    point(bounds.x0 + width * 0.45, bounds.y1),
-    point(bounds.x0 + width * 0.08, bounds.y1 - height * 0.08),
-    point(bounds.x0, bounds.y0 + height * 0.53),
+    point(bounds.x0 + width * 0.02, bounds.y0 + height * 0.18),
+    point(bounds.x0 + width * 0.12, bounds.y0 + height * 0.05),
+    point(bounds.x0 + width * 0.42, bounds.y0),
+    point(bounds.x0 + width * 0.7, bounds.y0 + height * 0.05),
+    point(bounds.x1 - width * 0.04, bounds.y0 + height * 0.18),
+    point(bounds.x1, bounds.y0 + height * 0.39),
+    point(bounds.x0 + width * 0.94, bounds.y0 + height * 0.61),
+    point(bounds.x1 - width * 0.1, bounds.y1 - height * 0.04),
+    point(bounds.x0 + width * 0.68, bounds.y1),
+    point(bounds.x0 + width * 0.42, bounds.y1 - height * 0.06),
+    point(bounds.x0 + width * 0.18, bounds.y1),
+    point(bounds.x0 + width * 0.04, bounds.y1 - height * 0.16),
+    point(bounds.x0, bounds.y0 + height * 0.68),
+    point(bounds.x0 + width * 0.05, bounds.y0 + height * 0.43),
   ];
 }
 
@@ -121,6 +132,107 @@ function randomizeShape(template: Coordinate[], seed: number, key: string, jitte
     const nextY = y + driftY + (stableUnit(seed, `${key}:${index}:y`) - 0.5) * pointJitter;
     return point(Math.max(0, Math.min(BOUNDS[2], nextX)), Math.max(0, Math.min(BOUNDS[3], nextY)));
   });
+}
+
+interface ContinentSpec {
+  key: string;
+  center: Coordinate;
+  radius: Coordinate;
+  rotation: number;
+  vertices?: number;
+}
+
+function rotateLocal(local: Coordinate, rotation: number): Coordinate {
+  const [x, y] = local;
+  const cosine = Math.cos(rotation);
+  const sine = Math.sin(rotation);
+  return [x * cosine - y * sine, x * sine + y * cosine];
+}
+
+function continentShape(spec: ContinentSpec, seed: number): Coordinate[] {
+  const vertices = spec.vertices ?? 20;
+  return Array.from({ length: vertices }, (_, index) => {
+    const angle = index / vertices * Math.PI * 2 - Math.PI / 2;
+    const radial = 0.84 + stableUnit(seed, `${spec.key}:coast:${index}`) * 0.24;
+    const local = rotateLocal([
+      Math.cos(angle) * spec.radius[0] * radial,
+      Math.sin(angle) * spec.radius[1] * radial,
+    ], spec.rotation);
+    const notch = (stableUnit(seed, `${spec.key}:notch:${index}`) - 0.5) * Math.min(spec.radius[0], spec.radius[1]) * 0.16;
+    return point(
+      Math.max(16, Math.min(BOUNDS[2] - 16, spec.center[0] + local[0] + Math.cos(angle) * notch)),
+      Math.max(16, Math.min(BOUNDS[3] - 16, spec.center[1] + local[1] + Math.sin(angle) * notch)),
+    );
+  });
+}
+
+function mountainRange(
+  center: Coordinate,
+  length: number,
+  width: number,
+  rotation: number,
+  seed: number,
+  key: string,
+): Coordinate[] {
+  const segments = 8;
+  const top: Coordinate[] = [];
+  const bottom: Coordinate[] = [];
+  const cosine = Math.cos(rotation);
+  const sine = Math.sin(rotation);
+  const rotate = (local: Coordinate): Coordinate => [
+    center[0] + local[0] * cosine - local[1] * sine,
+    center[1] + local[0] * sine + local[1] * cosine,
+  ];
+  for (let index = 0; index <= segments; index += 1) {
+    const ratio = index / segments - 0.5;
+    const thickness = width * (0.58 + stableUnit(seed, `${key}:width:${index}`) * 0.42);
+    const drift = (stableUnit(seed, `${key}:drift:${index}`) - 0.5) * width * 0.5;
+    top.push(rotate([ratio * length, -thickness + drift]));
+    bottom.push(rotate([ratio * length, thickness + drift]));
+  }
+  return [...top, ...bottom.reverse()].map(([x, y]) => point(
+    Math.max(0, Math.min(BOUNDS[2], x)),
+    Math.max(0, Math.min(BOUNDS[3], y)),
+  ));
+}
+
+function clipToHalfPlane(polygon: Coordinate[], site: Coordinate, other: Coordinate): Coordinate[] {
+  if (!polygon.length) return [];
+  const midpoint: Coordinate = [(site[0] + other[0]) / 2, (site[1] + other[1]) / 2];
+  const normal: Coordinate = [other[0] - site[0], other[1] - site[1]];
+  const inside = (candidate: Coordinate) =>
+    (candidate[0] - midpoint[0]) * normal[0] + (candidate[1] - midpoint[1]) * normal[1] <= 0.001;
+  const intersection = (start: Coordinate, end: Coordinate): Coordinate => {
+    const startValue = (start[0] - midpoint[0]) * normal[0] + (start[1] - midpoint[1]) * normal[1];
+    const endValue = (end[0] - midpoint[0]) * normal[0] + (end[1] - midpoint[1]) * normal[1];
+    const ratio = startValue / (startValue - endValue || 1);
+    return point(start[0] + (end[0] - start[0]) * ratio, start[1] + (end[1] - start[1]) * ratio);
+  };
+  const result: Coordinate[] = [];
+  let previous = polygon[polygon.length - 1];
+  let previousInside = inside(previous);
+  for (const current of polygon) {
+    const currentInside = inside(current);
+    if (currentInside !== previousInside) result.push(intersection(previous, current));
+    if (currentInside) result.push(current);
+    previous = current;
+    previousInside = currentInside;
+  }
+  return result;
+}
+
+function regionCell(site: Coordinate, sites: Coordinate[]): Coordinate[] {
+  let polygon: Coordinate[] = [
+    point(0, 0),
+    point(BOUNDS[2], 0),
+    point(BOUNDS[2], BOUNDS[3]),
+    point(0, BOUNDS[3]),
+  ];
+  for (const other of sites) {
+    if (other === site) continue;
+    polygon = clipToHalfPlane(polygon, site, other);
+  }
+  return polygon;
 }
 
 function pointInsidePolygon(candidate: Coordinate, polygon: Coordinate[]): boolean {
@@ -314,13 +426,20 @@ export function createAlliance(seed = 20260808): AllianceModel {
   const territory = allianceTerritory(placement);
   const settlements: AllianceSettlement[] = [];
   const capitals = [
-    settlement("capital-northwest", "霜原城", "capital", fitAlliancePoint(point(210, 190), placement), 78_000, null, "北方边境", seed + 11, { influenceRadius: 180 }),
-    settlement("capital-northeast", "晨曦城", "capital", fitAlliancePoint(point(670, 190), placement), 96_000, null, "东部行省", seed + 17, { influenceRadius: 190 }),
-    settlement("capital-heart", "曙光城", "capital", fitAlliancePoint(point(450, 450), placement), 124_000, null, "中央行省", seed + 23, { influenceRadius: 195 }),
-    settlement("capital-southwest", "潮汐城", "capital", fitAlliancePoint(point(200, 700), placement), 91_000, null, "南部海岸", seed + 29, { influenceRadius: 185 }),
-    settlement("capital-southeast", "赤穹城", "capital", fitAlliancePoint(point(660, 700), placement), 88_000, null, "东南边疆", seed + 31, { influenceRadius: 190 }),
+    settlement("capital-northwest", "霜原城", "capital", fitAlliancePoint(point(210, 190), placement), 78_000, null, "北方边境", seed + 11, { influenceRadius: 250 }),
+    settlement("capital-northeast", "晨曦城", "capital", fitAlliancePoint(point(670, 190), placement), 96_000, null, "东部行省", seed + 17, { influenceRadius: 255 }),
+    settlement("capital-heart", "曙光城", "capital", fitAlliancePoint(point(450, 450), placement), 124_000, null, "中央行省", seed + 23, { influenceRadius: 260 }),
+    settlement("capital-southwest", "潮汐城", "capital", fitAlliancePoint(point(200, 700), placement), 91_000, null, "南部海岸", seed + 29, { influenceRadius: 250 }),
+    settlement("capital-southeast", "赤穹城", "capital", fitAlliancePoint(point(660, 700), placement), 88_000, null, "东南边疆", seed + 31, { influenceRadius: 255 }),
   ];
   settlements.push(...capitals);
+  const regions: AllianceRegion[] = capitals.map((capital, index) => ({
+    id: `region-${capital.id}`,
+    name: capital.region,
+    capitalId: capital.id,
+    polygon: regionCell(capital.position, capitals.map((item) => item.position)),
+    colorIndex: index,
+  }));
   const outerCapitalRoadOrder = [0, 1, 4, 3];
   const imperialSegments: Array<[Coordinate, Coordinate]> = [
     ...outerCapitalRoadOrder.map((capitalIndex, index) => [
@@ -437,50 +556,73 @@ export function createAlliance(seed = 20260808): AllianceModel {
     }
   }
 
+  const continentSpecs: ContinentSpec[] = [
+    { key: "continent-northwest", center: point(430, 330), radius: point(360, 245), rotation: -0.14 },
+    { key: "continent-northeast", center: point(2680, 315), radius: point(420, 255), rotation: 0.16 },
+    { key: "continent-western", center: point(390, 980), radius: point(295, 235), rotation: -0.2 },
+    { key: "continent-eastern", center: point(2790, 1020), radius: point(325, 250), rotation: 0.1 },
+    { key: "continent-southwest", center: point(700, 1480), radius: point(290, 210), rotation: 0.18 },
+    { key: "continent-southeast", center: point(2460, 1480), radius: point(310, 220), rotation: -0.12 },
+    { key: "continent-south-polar", center: point(1600, 1765), radius: point(650, 78), rotation: 0, vertices: 24 },
+  ];
+  const islandSpecs: ContinentSpec[] = [
+    { key: "island-north-channel", center: point(1540, 235), radius: point(105, 62), rotation: -0.1, vertices: 14 },
+    { key: "island-west-channel", center: point(980, 475), radius: point(92, 66), rotation: 0.2, vertices: 13 },
+    { key: "island-east-channel", center: point(2170, 505), radius: point(115, 70), rotation: -0.18, vertices: 15 },
+    { key: "island-south-channel", center: point(1580, 1430), radius: point(125, 70), rotation: 0.12, vertices: 15 },
+    { key: "island-far-east", center: point(3070, 610), radius: point(72, 125), rotation: 0.18, vertices: 14 },
+    { key: "island-far-west", center: point(120, 1450), radius: point(95, 62), rotation: -0.1, vertices: 13 },
+  ];
   const landmasses: Coordinate[][] = [
     territory,
-    randomizeShape([
-      point(900, 140), point(1040, 90), point(1190, 150), point(1320, 80), point(1510, 150), point(1600, 360),
-      point(1510, 520), point(1380, 500), point(1260, 600), point(1080, 530), point(950, 430),
-    ], seed, "landmass-east", 52),
-    randomizeShape([
-      point(720, 700), point(900, 650), point(1080, 700), point(1240, 640), point(1440, 760), point(1600, 700),
-      point(1600, 1000), point(720, 1000),
-    ], seed, "landmass-south", 48),
+    ...continentSpecs.map((spec) => continentShape(spec, seed)),
+    ...islandSpecs.map((spec) => continentShape(spec, seed)),
   ];
   const mountains: Coordinate[][] = [
-    randomizeShape([
-      point(930, 70), point(1050, 120), point(1130, 65), point(1240, 145), point(1370, 92), point(1510, 180),
-      point(1450, 330), point(1260, 290), point(1110, 350), point(980, 260),
-    ], seed, "mountains-north", 38),
-    randomizeShape([
-      point(890, 820), point(1040, 700), point(1160, 770), point(1270, 680), point(1410, 760), point(1550, 710),
-      point(1600, 980), point(1080, 980),
-    ], seed, "mountains-south", 42),
-    randomizeShape([
-      point(1350, 390), point(1440, 330), point(1580, 390), point(1510, 590), point(1390, 620), point(1300, 520),
-    ], seed, "mountains-east", 34),
-    randomizeShape([
-      point(70, 900), point(210, 850), point(330, 905), point(470, 860), point(620, 930), point(760, 890),
-      point(840, 1000), point(40, 1000),
-    ], seed, "mountains-west", 30),
+    mountainRange(point(410, 330), 560, 86, -0.22, seed, "mountain-northwest"),
+    mountainRange(point(2680, 320), 680, 92, 0.2, seed, "mountain-northeast"),
+    mountainRange(point(390, 980), 470, 78, -0.3, seed, "mountain-western"),
+    mountainRange(point(2790, 1020), 500, 80, 0.28, seed, "mountain-eastern"),
+    mountainRange(point(700, 1480), 450, 74, 0.2, seed, "mountain-southwest"),
+    mountainRange(point(2460, 1480), 520, 82, -0.16, seed, "mountain-southeast"),
+    mountainRange(point((placement.x0 + placement.x1) / 2, placement.y0 + 205), 560, 76, 0.12, seed, "mountain-alliance"),
   ];
   const rivers: Coordinate[][] = [
-    randomizeShape([point(930, 0), point(1020, 180), point(1110, 310), point(1080, 470), point(1180, 620), point(1110, 810), point(1230, 1000)], seed, "river-one", 26),
-    randomizeShape([point(1570, 0), point(1480, 160), point(1510, 300), point(1430, 450), point(1470, 650), point(1400, 820), point(1510, 1000)], seed, "river-two", 24),
-    randomizeShape([point(930, 570), point(1040, 560), point(1170, 650), point(1300, 630), point(1460, 700)], seed, "river-three", 32),
+    randomizeShape([point(250, 115), point(320, 220), point(350, 360), point(500, 510), point(550, 690)], seed, "river-northwest-a", 30),
+    randomizeShape([point(610, 120), point(590, 280), point(660, 410), point(610, 560)], seed, "river-northwest-b", 26),
+    randomizeShape([point(2450, 100), point(2520, 260), point(2480, 400), point(2620, 530)], seed, "river-northeast-a", 30),
+    randomizeShape([point(2860, 90), point(2790, 270), point(2850, 440), point(2760, 590)], seed, "river-northeast-b", 28),
+    randomizeShape([point(280, 790), point(340, 940), point(300, 1100), point(450, 1210)], seed, "river-western", 26),
+    randomizeShape([point(2750, 820), point(2700, 960), point(2820, 1110), point(2740, 1215)], seed, "river-eastern", 24),
+    randomizeShape([point(620, 1320), point(700, 1410), point(820, 1510), point(900, 1610)], seed, "river-southwest", 24),
+    randomizeShape([point(2550, 1320), point(2470, 1420), point(2520, 1540), point(2440, 1640)], seed, "river-southeast", 25),
+    randomizeShape([
+      point(placement.x0 + (placement.x1 - placement.x0) * 0.68, placement.y0 + 44),
+      point(placement.x0 + (placement.x1 - placement.x0) * 0.72, placement.y0 + 190),
+      point(placement.x0 + (placement.x1 - placement.x0) * 0.64, placement.y0 + 370),
+      point(placement.x0 + (placement.x1 - placement.x0) * 0.72, placement.y1 + 55),
+    ], seed, "river-alliance-east", 24),
+    randomizeShape([
+      point(placement.x0 + 140, placement.y0 + 110),
+      point(placement.x0 + 185, placement.y0 + 230),
+      point(placement.x0 + 110, placement.y0 + 390),
+      point(placement.x0 + 205, placement.y1 + 40),
+    ], seed, "river-alliance-west", 22),
   ];
   const lakes: Coordinate[][] = [
-    randomizeShape([point(1010, 390), point(1110, 350), point(1200, 390), point(1225, 475), point(1160, 535), point(1050, 505), point(990, 450)], seed, "lake-one", 28),
-    randomizeShape([point(1330, 170), point(1410, 130), point(1490, 175), point(1510, 250), point(1450, 300), point(1360, 275)], seed, "lake-two", 24),
-    randomizeShape([point(960, 720), point(1040, 680), point(1120, 715), point(1135, 790), point(1060, 825), point(980, 790)], seed, "lake-three", 25),
+    randomizeShape([point(430, 325), point(500, 285), point(570, 320), point(580, 390), point(515, 430), point(445, 400)], seed, "lake-northwest", 22),
+    randomizeShape([point(2600, 300), point(2700, 245), point(2800, 290), point(2810, 380), point(2720, 420), point(2630, 390)], seed, "lake-northeast", 25),
+    randomizeShape([point(280, 1010), point(355, 960), point(430, 1005), point(435, 1080), point(360, 1120), point(290, 1080)], seed, "lake-western", 20),
+    randomizeShape([point(2760, 1015), point(2840, 965), point(2915, 1015), point(2900, 1090), point(2825, 1120), point(2750, 1080)], seed, "lake-eastern", 22),
+    randomizeShape([point(650, 1470), point(720, 1425), point(800, 1465), point(810, 1535), point(740, 1580), point(665, 1540)], seed, "lake-southwest", 18),
+    randomizeShape([point(2430, 1470), point(2500, 1425), point(2575, 1470), point(2560, 1540), point(2480, 1580), point(2420, 1530)], seed, "lake-southeast", 20),
   ];
   const bands: AllianceTerrainBand[] = [
-    { id: "polar-north", label: "北极圈", y0: 0, y1: 135, kind: "polar" },
-    { id: "north-temperate", label: "北温带", y0: 135, y1: 390, kind: "cold" },
-    { id: "equatorial", label: "赤道带", y0: 390, y1: 610, kind: "equatorial" },
-    { id: "south-temperate", label: "南温带", y0: 610, y1: 865, kind: "temperate" },
-    { id: "polar-south", label: "南极圈", y0: 865, y1: 1000, kind: "polar" },
+    { id: "polar-north", label: "北极圈", y0: 0, y1: 220, kind: "polar" },
+    { id: "north-temperate", label: "北温带", y0: 220, y1: 620, kind: "cold" },
+    { id: "equatorial", label: "赤道带", y0: 620, y1: 1080, kind: "equatorial" },
+    { id: "south-temperate", label: "南温带", y0: 1080, y1: 1580, kind: "temperate" },
+    { id: "polar-south", label: "南极圈", y0: 1580, y1: 1800, kind: "polar" },
   ];
   return {
     name: "人类联盟",
@@ -492,6 +634,7 @@ export function createAlliance(seed = 20260808): AllianceModel {
     mountains,
     rivers,
     lakes,
+    regions,
     settlements,
     roads,
   };

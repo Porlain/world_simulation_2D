@@ -24,6 +24,17 @@ const emit = defineEmits<{
   (event: "open-settlement", settlement: AllianceSettlement): void;
 }>();
 
+const worldBounds = computed(() => props.alliance.bounds);
+const worldCenter = computed(() => [
+  worldBounds.value[0] + worldBounds.value[2] / 2,
+  worldBounds.value[1] + worldBounds.value[3] / 2,
+] as [number, number]);
+const equatorPath = computed(() => `M${worldBounds.value[0]} ${worldCenter.value[1]} H${worldBounds.value[0] + worldBounds.value[2]}`);
+const equatorLabelPosition = computed(() => [
+  worldBounds.value[0] + worldBounds.value[2] - 280,
+  worldCenter.value[1] - 8,
+] as [number, number]);
+
 const animationTick = ref(0);
 const compactView = ref(false);
 const zoomFactor = ref(1);
@@ -38,17 +49,17 @@ const compactViewBox = computed(() => {
   const xs = props.alliance.territory.map(([x]) => x);
   const ys = props.alliance.territory.map(([, y]) => y);
   const padding = 60;
-  const x = Math.max(0, Math.min(...xs) - padding);
-  const y = Math.max(0, Math.min(...ys) - padding);
-  const right = Math.min(1600, Math.max(...xs) + padding);
-  const bottom = Math.min(1000, Math.max(...ys) + padding);
+  const x = Math.max(worldBounds.value[0], Math.min(...xs) - padding);
+  const y = Math.max(worldBounds.value[1], Math.min(...ys) - padding);
+  const right = Math.min(worldBounds.value[0] + worldBounds.value[2], Math.max(...xs) + padding);
+  const bottom = Math.min(worldBounds.value[1] + worldBounds.value[3], Math.max(...ys) + padding);
   return `${x} ${y} ${right - x} ${bottom - y}`;
 });
 
 const mapViewBox = computed(() => {
   const [baseX, baseY, baseWidth, baseHeight] = compactView.value
     ? compactViewBox.value.split(" ").map(Number)
-    : [0, 0, 1600, 1000];
+    : [...worldBounds.value];
   const width = Math.min(baseWidth, baseWidth / zoomFactor.value);
   const height = Math.min(baseHeight, baseHeight / zoomFactor.value);
   const x = Math.max(baseX, Math.min(baseX + baseWidth - width, viewCenter.value[0] - width / 2));
@@ -57,6 +68,11 @@ const mapViewBox = computed(() => {
 });
 
 const zoomLabel = computed(() => `${Math.round(zoomFactor.value * 100)}%`);
+const detailLevel = computed<"world" | "regions" | "settlements">(() => {
+  if (zoomFactor.value < 1.25) return "world";
+  if (zoomFactor.value < 2.35) return "regions";
+  return "settlements";
+});
 const territoryLabelPosition = computed(() => [
   Math.min(...props.alliance.territory.map(([x]) => x)) + 4,
   Math.max(36, Math.min(...props.alliance.territory.map(([, y]) => y)) - 18),
@@ -103,7 +119,7 @@ function resetView(): void {
     const [x, y, width, height] = compactViewBox.value.split(" ").map(Number);
     viewCenter.value = [x + width / 2, y + height / 2];
   } else {
-    viewCenter.value = [800, 500];
+    viewCenter.value = worldCenter.value;
   }
 }
 
@@ -202,8 +218,8 @@ function terrainBounds(points: Coordinate[]): { x0: number; x1: number; y0: numb
 }
 
 function climateSafeKind(kind: TerrainPatchKind, y: number): TerrainPatchKind {
-  const polar = y < 150 || y > 850;
-  const cold = y < 315 || y > 685;
+  const polar = y < 220 || y > 1580;
+  const cold = y < 620 || y > 1080;
   if (kind === "desert" && polar) return "tundra";
   if (kind === "desert" && cold) return "steppe";
   if (kind === "rainforest" && cold) return "forest";
@@ -252,14 +268,38 @@ function settlementRadius(settlement: AllianceSettlement): number {
   return settlement.kind === "capital" ? 16 : settlement.kind === "town" ? 10 : 5;
 }
 
+function settlementMarkerPath(settlement: AllianceSettlement): string {
+  const [x, y] = settlement.position;
+  const size = settlementRadius(settlement) * (settlement.kind === "capital" ? 1.14 : 1);
+  if (settlement.kind === "capital") {
+    return `M${x},${y - size} L${x + size * 0.78},${y - size * 0.32} L${x + size * 0.62},${y + size * 0.72} L${x},${y + size} L${x - size * 0.62},${y + size * 0.72} L${x - size * 0.78},${y - size * 0.32} Z`;
+  }
+  if (settlement.kind === "town") {
+    return `M${x},${y - size} L${x + size},${y} L${x},${y + size} L${x - size},${y} Z`;
+  }
+  return `M${x - size * 0.72},${y - size * 0.72} H${x + size * 0.72} V${y + size * 0.72} H${x - size * 0.72} Z`;
+}
+
 function settlementClass(settlement: AllianceSettlement): string {
   return `alliance-settlement alliance-settlement--${settlement.kind}${props.selectedId === settlement.id ? " is-selected" : ""}`;
 }
 
 function shouldShowSettlementLabel(settlement: AllianceSettlement): boolean {
   if (settlement.kind === "capital") return true;
-  if (settlement.kind === "town") return zoomFactor.value >= 1.4;
-  return zoomFactor.value >= 2.5;
+  if (settlement.kind === "town") return detailLevel.value === "settlements";
+  return detailLevel.value === "settlements" && zoomFactor.value >= 2.8;
+}
+
+function shouldShowSettlement(settlement: AllianceSettlement): boolean {
+  if (detailLevel.value === "world") return settlement.kind === "capital";
+  if (detailLevel.value === "regions") return settlement.kind !== "village";
+  return true;
+}
+
+function regionLabelPosition(region: AllianceModel["regions"][number]): [number, number] {
+  const capital = props.alliance.settlements.find((settlement) => settlement.id === region.capitalId);
+  if (!capital) return [0, 0];
+  return [capital.position[0], capital.position[1] - 34];
 }
 
 onMounted(() => {
@@ -411,19 +451,19 @@ onUnmounted(() => {
           <polygon :points="alliancePolygon(alliance.territory)" />
         </clipPath>
       </defs>
-      <rect x="0" y="0" width="1600" height="1000" class="alliance-map__ground" />
-      <image x="0" y="0" width="1600" height="1000" href="/assets/ocean-texture.jpg" preserveAspectRatio="xMidYMid slice" class="alliance-ocean-texture" aria-hidden="true" />
-      <rect x="0" y="0" width="1600" height="1000" class="alliance-map__grid" />
+      <rect :x="worldBounds[0]" :y="worldBounds[1]" :width="worldBounds[2]" :height="worldBounds[3]" class="alliance-map__ground" />
+      <image :x="worldBounds[0]" :y="worldBounds[1]" :width="worldBounds[2]" :height="worldBounds[3]" href="/assets/ocean-texture.jpg" preserveAspectRatio="xMidYMid slice" class="alliance-ocean-texture" aria-hidden="true" />
+      <rect :x="worldBounds[0]" :y="worldBounds[1]" :width="worldBounds[2]" :height="worldBounds[3]" class="alliance-map__grid" />
 
       <g class="alliance-landmasses" aria-label="陆地">
         <polygon v-for="(landmass, index) in alliance.landmasses" :key="`landmass-${index}`" :points="alliancePolygon(landmass)" :class="['alliance-landmass', `alliance-landmass--variant-${landmassVariant(index)}`]" />
       </g>
 
       <g class="alliance-climate-field" clip-path="url(#alliance-land-clip)" aria-label="气候渐变">
-        <rect x="0" y="0" width="1600" height="1000" class="alliance-climate-field__gradient" />
-        <rect x="0" y="0" width="1600" height="1000" class="alliance-climate-field__noise" />
-        <ellipse cx="800" cy="52" rx="920" ry="185" class="alliance-climate-wash alliance-climate-wash--ice" />
-        <ellipse cx="800" cy="948" rx="920" ry="185" class="alliance-climate-wash alliance-climate-wash--ice" />
+        <rect :x="worldBounds[0]" :y="worldBounds[1]" :width="worldBounds[2]" :height="worldBounds[3]" class="alliance-climate-field__gradient" />
+        <rect :x="worldBounds[0]" :y="worldBounds[1]" :width="worldBounds[2]" :height="worldBounds[3]" class="alliance-climate-field__noise" />
+        <ellipse :cx="worldCenter[0]" :cy="worldBounds[1] + 90" :rx="worldBounds[2] * 0.58" :ry="worldBounds[3] * 0.17" class="alliance-climate-wash alliance-climate-wash--ice" />
+        <ellipse :cx="worldCenter[0]" :cy="worldBounds[1] + worldBounds[3] - 90" :rx="worldBounds[2] * 0.58" :ry="worldBounds[3] * 0.17" class="alliance-climate-wash alliance-climate-wash--ice" />
         <ellipse v-for="patch in terrainPatches" :key="patch.id" :cx="patch.cx" :cy="patch.cy" :rx="patch.rx" :ry="patch.ry" :transform="`rotate(${patch.rotation} ${patch.cx} ${patch.cy})`" :class="['alliance-biome-patch', `alliance-biome-patch--${patch.kind}`]" :style="{ opacity: patch.opacity }" />
       </g>
 
@@ -432,21 +472,17 @@ onUnmounted(() => {
         <text :x="territoryLabelPosition[0]" :y="territoryLabelPosition[1]" class="alliance-territory__label">人类联盟控制区</text>
       </g>
 
-      <g class="alliance-latitudes" clip-path="url(#alliance-land-clip)">
-        <text v-for="band in alliance.bands" :key="`${band.id}-label`" x="34" :y="(band.y0 + band.y1) / 2" class="alliance-band-label">{{ band.label }}</text>
-        <path d="M0 500 L1600 500" class="alliance-equator" />
-        <text x="1320" y="492" class="alliance-equator-label">赤道</text>
+      <g v-if="detailLevel !== 'world'" class="alliance-regions" aria-label="联盟行政区域" clip-path="url(#alliance-territory-clip)">
+        <g v-for="region in alliance.regions" :key="region.id">
+          <polygon :points="alliancePolygon(region.polygon)" :class="['alliance-region', `alliance-region--${region.colorIndex}`]" />
+          <text v-if="detailLevel === 'regions' || detailLevel === 'settlements'" :x="regionLabelPosition(region)[0]" :y="regionLabelPosition(region)[1]" class="alliance-region__label">{{ region.name }}</text>
+        </g>
       </g>
 
-      <g class="alliance-influence-ranges" aria-label="主城辐射范围" clip-path="url(#alliance-territory-clip)">
-        <circle
-          v-for="(capital, index) in alliance.settlements.filter((item) => item.kind === 'capital')"
-          :key="`${capital.id}-influence`"
-          :cx="capital.position[0]"
-          :cy="capital.position[1]"
-          :r="capital.influenceRadius ?? 140"
-          :class="`alliance-influence alliance-influence--${index}`"
-        />
+      <g class="alliance-latitudes" clip-path="url(#alliance-land-clip)">
+        <text v-for="band in alliance.bands" :key="`${band.id}-label`" x="34" :y="(band.y0 + band.y1) / 2" class="alliance-band-label">{{ band.label }}</text>
+        <path :d="equatorPath" class="alliance-equator" />
+        <text :x="equatorLabelPosition[0]" :y="equatorLabelPosition[1]" class="alliance-equator-label">赤道</text>
       </g>
 
       <g class="alliance-mountains" aria-label="山脉">
@@ -467,12 +503,14 @@ onUnmounted(() => {
       </g>
 
       <g class="alliance-settlements" aria-label="聚落">
-        <g v-for="settlement in alliance.settlements" :key="settlement.id" :class="settlementClass(settlement)" role="button" tabindex="0" :aria-label="`${settlement.name}，双击查看街道细节`" @click="handleSettlementClick(settlement)" @dblclick="handleSettlementOpen(settlement)" @keydown.enter="handleSettlementClick(settlement)">
-          <title>{{ settlement.name }} · {{ settlement.kind === "capital" ? "主城" : settlement.kind === "town" ? "城镇" : "村庄" }} · {{ settlement.population.toLocaleString("zh-CN") }} 人</title>
-          <circle :cx="settlement.position[0]" :cy="settlement.position[1]" :r="settlementRadius(settlement)" class="alliance-settlement__halo" />
-          <circle :cx="settlement.position[0]" :cy="settlement.position[1]" :r="settlementRadius(settlement) * 0.58" class="alliance-settlement__core" />
-          <text v-if="shouldShowSettlementLabel(settlement)" :x="settlement.position[0] + settlementRadius(settlement) + 8" :y="settlement.position[1] + 4" class="alliance-settlement__label">{{ settlement.name }}</text>
-        </g>
+        <template v-for="settlement in alliance.settlements" :key="settlement.id">
+          <g v-if="shouldShowSettlement(settlement)" :class="settlementClass(settlement)" role="button" tabindex="0" :aria-label="`${settlement.name}，双击查看街道细节`" @click="handleSettlementClick(settlement)" @dblclick="handleSettlementOpen(settlement)" @keydown.enter="handleSettlementClick(settlement)">
+            <title>{{ settlement.name }} · {{ settlement.kind === "capital" ? "主城" : settlement.kind === "town" ? "城镇" : "村庄" }} · {{ settlement.population.toLocaleString("zh-CN") }} 人</title>
+            <path :d="settlementMarkerPath(settlement)" class="alliance-settlement__marker" />
+            <path v-if="settlement.kind === 'capital'" :d="`M${settlement.position[0]},${settlement.position[1] - 5} L${settlement.position[0] + 5},${settlement.position[1] + 4} L${settlement.position[0]},${settlement.position[1] + 8} L${settlement.position[0] - 5},${settlement.position[1] + 4} Z`" class="alliance-settlement__marker-core" />
+            <text v-if="shouldShowSettlementLabel(settlement)" :x="settlement.position[0] + settlementRadius(settlement) + 8" :y="settlement.position[1] + 4" class="alliance-settlement__label">{{ settlement.name }}</text>
+          </g>
+        </template>
       </g>
     </svg>
 
@@ -490,7 +528,7 @@ onUnmounted(() => {
       <span><i class="alliance-legend-line alliance-legend-line--river"></i>河流</span>
       <span><i class="alliance-legend-swatch alliance-legend-swatch--lake"></i>湖泊</span>
       <span><i class="alliance-legend-line alliance-legend-line--road"></i>联盟道路</span>
-      <span><i class="alliance-legend-line alliance-legend-line--influence"></i>主城辐射范围</span>
+      <span><i class="alliance-legend-line alliance-legend-line--region"></i>行政区域</span>
       <span><i class="alliance-legend-biome alliance-legend-biome--polar"></i>冻原</span>
       <span><i class="alliance-legend-biome alliance-legend-biome--temperate"></i>温带</span>
       <span><i class="alliance-legend-biome alliance-legend-biome--arid"></i>干旱带</span>
@@ -509,6 +547,12 @@ onUnmounted(() => {
   --terrain-edge: oklch(0.72 0.07 125);
   --terrain-ink: oklch(0.9 0.035 150);
   background: var(--terrain-ocean);
+}
+.alliance-map--pearl {
+  --terrain-ocean: oklch(0.74 0.09 239);
+  --terrain-land: oklch(0.78 0.085 128);
+  --terrain-edge: oklch(0.47 0.055 132);
+  --terrain-ink: oklch(0.26 0.045 245);
 }
 
 .alliance-map__svg {
@@ -554,6 +598,11 @@ onUnmounted(() => {
   outline: none;
 }
 .alliance-map__zoom-controls span { min-width: 38px; text-align: center; }
+.alliance-map--pearl .alliance-map__zoom-controls {
+  color: oklch(0.27 0.04 245);
+  background: oklch(0.91 0.045 95 / 0.9);
+  border-color: oklch(0.36 0.05 125 / 0.3);
+}
 
 .alliance-map__ground { fill: var(--terrain-ocean); }
 .alliance-ocean-texture { opacity: 0.16; mix-blend-mode: screen; filter: saturate(0.72) contrast(0.88); }
@@ -577,6 +626,14 @@ onUnmounted(() => {
 .alliance-land-texture__rock-ground { fill: oklch(0.43 0.05 105); }
 .alliance-land-texture__rock-ridge { fill: none; stroke: oklch(0.63 0.05 100); stroke-width: 1.6; opacity: 0.42; }
 .alliance-land-texture__rock-facet { fill: oklch(0.7 0.05 94); opacity: 0.34; }
+.alliance-map--pearl .alliance-land-texture__dry-ground { fill: oklch(0.84 0.1 87); }
+.alliance-map--pearl .alliance-land-texture__dry-ridge { stroke: oklch(0.63 0.08 83); }
+.alliance-map--pearl .alliance-land-texture__forest-ground { fill: oklch(0.62 0.1 141); }
+.alliance-map--pearl .alliance-land-texture__forest-grain { stroke: oklch(0.42 0.1 138); }
+.alliance-map--pearl .alliance-land-texture__canopy { fill: oklch(0.48 0.11 143); }
+.alliance-map--pearl .alliance-land-texture__rock-ground { fill: oklch(0.67 0.06 105); }
+.alliance-map--pearl .alliance-land-texture__rock-ridge { stroke: oklch(0.45 0.05 100); }
+.alliance-map--pearl .alliance-land-texture__rock-facet { fill: oklch(0.81 0.06 94); }
 .alliance-climate-field { mix-blend-mode: multiply; pointer-events: none; }
 .alliance-climate-field__gradient { fill: url("#alliance-climate-gradient"); opacity: 0.72; }
 .alliance-climate-field__noise { fill: oklch(0.74 0.025 120); opacity: 0.22; filter: url("#alliance-terrain-noise"); mix-blend-mode: soft-light; }
@@ -599,16 +656,20 @@ onUnmounted(() => {
 .alliance-equator-label { fill: oklch(0.9 0.1 88); font: 700 14px "Noto Sans SC Variable", sans-serif; paint-order: stroke; stroke: var(--terrain-ocean); stroke-width: 4px; }
 .alliance-territory__fill { fill: oklch(0.76 0.12 82); fill-opacity: 0.12; stroke: oklch(0.84 0.12 84); stroke-width: 3; stroke-dasharray: 12 10; }
 .alliance-territory__label { fill: oklch(0.91 0.1 88); font: 700 19px "Noto Sans SC Variable", sans-serif; letter-spacing: 1px; paint-order: stroke; stroke: oklch(0.28 0.055 203); stroke-width: 6px; }
-.alliance-influence { stroke-width: 2.5; stroke-dasharray: 12 10; opacity: 0.9; }
-.alliance-influence--0 { fill: #c8a34e; fill-opacity: 0.08; stroke: #e7c86d; }
-.alliance-influence--1 { fill: #6fb5a0; fill-opacity: 0.07; stroke: #9bd4bc; }
-.alliance-influence--2 { fill: #8a9bc2; fill-opacity: 0.07; stroke: #b6c7e5; }
-.alliance-influence--3 { fill: #c97e69; fill-opacity: 0.07; stroke: #e1a28c; }
-.alliance-influence--4 { fill: #9c8bc5; fill-opacity: 0.07; stroke: #c5b4e2; }
+.alliance-regions { pointer-events: none; }
+.alliance-region { stroke-width: 2.5; stroke-dasharray: 11 9; stroke-linejoin: round; }
+.alliance-region--0 { fill: oklch(0.76 0.12 82); fill-opacity: 0.32; stroke: oklch(0.79 0.13 83); }
+.alliance-region--1 { fill: oklch(0.7 0.1 156); fill-opacity: 0.3; stroke: oklch(0.76 0.11 154); }
+.alliance-region--2 { fill: oklch(0.69 0.09 244); fill-opacity: 0.3; stroke: oklch(0.76 0.1 244); }
+.alliance-region--3 { fill: oklch(0.72 0.11 46); fill-opacity: 0.3; stroke: oklch(0.78 0.12 47); }
+.alliance-region--4 { fill: oklch(0.69 0.1 310); fill-opacity: 0.3; stroke: oklch(0.76 0.11 310); }
+.alliance-region__label { fill: oklch(0.93 0.08 88); font: 700 15px "Noto Sans SC Variable", sans-serif; letter-spacing: 0.8px; paint-order: stroke; stroke: oklch(0.26 0.05 205); stroke-width: 5px; }
 
 .alliance-mountain { fill: url("#alliance-mountain-hatch"); stroke: #8eaa92; stroke-width: 2; opacity: 0.9; }
 .alliance-mountain-hatch__ground { fill: #314b47; }
 .alliance-mountain-hatch__ridge { fill: none; stroke: #779182; stroke-width: 1.6; opacity: 0.7; }
+.alliance-map--pearl .alliance-mountain-hatch__ground { fill: oklch(0.57 0.045 104); }
+.alliance-map--pearl .alliance-mountain-hatch__ridge { stroke: oklch(0.72 0.05 101); }
 .alliance-river { fill: none; stroke: #73c4cd; stroke-width: 11; stroke-linecap: round; opacity: 0.72; }
 .alliance-lake { fill: #2e7e8a; stroke: #8fd1d0; stroke-width: 2; opacity: 0.82; }
 .alliance-road { fill: none; stroke-linecap: round; stroke-linejoin: round; }
@@ -620,15 +681,16 @@ onUnmounted(() => {
 .alliance-flow-dot--vehicle { fill: #79b8e8; }
 
 .alliance-settlement { cursor: pointer; outline: none; }
-.alliance-settlement__halo { fill: #163d40; stroke: #dbe3c5; stroke-width: 2; }
-.alliance-settlement__core { fill: #e5b957; stroke: #142b2e; stroke-width: 2; }
-.alliance-settlement--town .alliance-settlement__core { fill: #9fc49c; }
-.alliance-settlement--village .alliance-settlement__core { fill: #d6d4a3; }
+.alliance-settlement__marker { stroke: oklch(0.24 0.045 203); stroke-width: 2.5; stroke-linejoin: round; }
+.alliance-settlement--capital .alliance-settlement__marker { fill: oklch(0.82 0.14 84); }
+.alliance-settlement--town .alliance-settlement__marker { fill: oklch(0.76 0.1 154); }
+.alliance-settlement--village .alliance-settlement__marker { fill: oklch(0.86 0.08 93); }
+.alliance-settlement__marker-core { fill: oklch(0.27 0.045 203); stroke: oklch(0.96 0.06 89); stroke-width: 1.5; pointer-events: none; }
 .alliance-settlement__label { fill: #edf2dd; font: 700 18px "Noto Sans SC Variable", sans-serif; paint-order: stroke; stroke: #132e31; stroke-width: 5px; stroke-linejoin: round; }
 .alliance-settlement--village .alliance-settlement__label { font-size: 13px; font-weight: 500; }
-.alliance-settlement:hover .alliance-settlement__halo,
-.alliance-settlement:focus .alliance-settlement__halo,
-.alliance-settlement.is-selected .alliance-settlement__halo { stroke: #ffd579; stroke-width: 4; }
+.alliance-settlement:hover .alliance-settlement__marker,
+.alliance-settlement:focus .alliance-settlement__marker,
+.alliance-settlement.is-selected .alliance-settlement__marker { stroke: oklch(0.91 0.16 86); stroke-width: 4; }
 
 .alliance-map__legend {
   position: absolute;
@@ -643,6 +705,11 @@ onUnmounted(() => {
   border: 1px solid rgba(193, 213, 185, 0.24);
   font-size: 12px;
 }
+.alliance-map--pearl .alliance-map__legend {
+  color: oklch(0.27 0.04 245);
+  background: oklch(0.91 0.045 95 / 0.92);
+  border-color: oklch(0.36 0.05 125 / 0.3);
+}
 .alliance-legend-swatch, .alliance-legend-line { display: inline-block; vertical-align: middle; margin-right: 5px; }
 .alliance-legend-swatch { width: 9px; height: 9px; border-radius: 50%; border: 2px solid #dbe3c5; background: #e5b957; }
 .alliance-legend-swatch--town { background: #9fc49c; }
@@ -650,7 +717,7 @@ onUnmounted(() => {
 .alliance-legend-swatch--lake { background: #2e7e8a; border-color: #8fd1d0; }
 .alliance-legend-line { width: 20px; height: 3px; background: #73c4cd; }
 .alliance-legend-line--road { background: #e0bc70; }
-.alliance-legend-line--influence { height: 0; border-top: 2px dashed #e7c86d; background: transparent; }
+.alliance-legend-line--region { height: 0; border-top: 2px dashed oklch(0.8 0.13 84); background: transparent; }
 .alliance-legend-biome { display: inline-block; width: 20px; height: 7px; margin-right: 5px; border-radius: 2px; }
 .alliance-legend-biome--polar { background: linear-gradient(90deg, oklch(0.84 0.045 185), oklch(0.68 0.065 163)); }
 .alliance-legend-biome--temperate { background: linear-gradient(90deg, oklch(0.5 0.095 145), oklch(0.62 0.095 122)); }
