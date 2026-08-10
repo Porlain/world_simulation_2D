@@ -317,6 +317,10 @@ function regionCell(site: Coordinate, sites: Coordinate[]): Coordinate[] {
   return polygon;
 }
 
+export function allianceCell(site: Coordinate, sites: Coordinate[]): Coordinate[] {
+  return regionCell(site, sites);
+}
+
 function countrySite(seed: number, key: string, polygon: Coordinate[], anchor: Coordinate): Coordinate {
   const bounds = polygonBounds(polygon);
   const anchored = point(

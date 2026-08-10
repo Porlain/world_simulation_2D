@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { LocateFixed, Minus, Plus } from "lucide-vue-next";
 import {
   allianceFlowPoint,
+  allianceCell,
   alliancePolygon,
   alliancePath,
   type AllianceModel,
@@ -218,12 +219,8 @@ type TerrainPatchKind = "ice" | "tundra" | "taiga" | "forest" | "meadow" | "step
 
 interface TerrainPatch {
   id: string;
-  cx: number;
-  cy: number;
-  rx: number;
-  ry: number;
+  polygon: Coordinate[];
   kind: TerrainPatchKind;
-  rotation: number;
   opacity: number;
 }
 
@@ -253,30 +250,44 @@ function climateSafeKind(kind: TerrainPatchKind, y: number): TerrainPatchKind {
 }
 
 const terrainPatches = computed<TerrainPatch[]>(() => {
-  const recipes: Array<{ kind: TerrainPatchKind; x: number; y: number; rx: number; ry: number }> = [
-    { kind: "forest", x: 0.24, y: 0.24, rx: 0.34, ry: 0.34 },
-    { kind: "desert", x: 0.70, y: 0.39, rx: 0.31, ry: 0.24 },
-    { kind: "wetland", x: 0.48, y: 0.69, rx: 0.29, ry: 0.25 },
-    { kind: "rock", x: 0.82, y: 0.18, rx: 0.24, ry: 0.27 },
+  const recipes: Array<{ kind: TerrainPatchKind; x: number; y: number }> = [
+    { kind: "ice", x: 0.08, y: 0.08 },
+    { kind: "taiga", x: 0.28, y: 0.12 },
+    { kind: "forest", x: 0.50, y: 0.16 },
+    { kind: "rock", x: 0.74, y: 0.10 },
+    { kind: "tundra", x: 0.92, y: 0.22 },
+    { kind: "forest", x: 0.18, y: 0.36 },
+    { kind: "meadow", x: 0.40, y: 0.34 },
+    { kind: "desert", x: 0.65, y: 0.37 },
+    { kind: "steppe", x: 0.86, y: 0.40 },
+    { kind: "wetland", x: 0.22, y: 0.64 },
+    { kind: "savanna", x: 0.46, y: 0.62 },
+    { kind: "rainforest", x: 0.71, y: 0.65 },
+    { kind: "wetland", x: 0.90, y: 0.68 },
+    { kind: "rock", x: 0.34, y: 0.86 },
+    { kind: "forest", x: 0.60, y: 0.84 },
+    { kind: "ice", x: 0.84, y: 0.90 },
   ];
   return props.alliance.landmasses.flatMap((landmass, landmassIndex) => {
     const bounds = terrainBounds(landmass);
     const width = Math.max(1, bounds.x1 - bounds.x0);
     const height = Math.max(1, bounds.y1 - bounds.y0);
-    return recipes.map((recipe, recipeIndex) => {
+    const sites = recipes.map((recipe, recipeIndex) => {
       const jitterX = (terrainUnit(props.alliance.seed, `${landmassIndex}:x:${recipeIndex}`) - 0.5) * 0.22;
       const jitterY = (terrainUnit(props.alliance.seed, `${landmassIndex}:y:${recipeIndex}`) - 0.5) * 0.18;
-      const cx = bounds.x0 + width * Math.max(0.08, Math.min(0.92, recipe.x + jitterX));
-      const cy = bounds.y0 + height * Math.max(0.08, Math.min(0.92, recipe.y + jitterY));
+      return [
+        bounds.x0 + width * Math.max(0.04, Math.min(0.96, recipe.x + jitterX)),
+        bounds.y0 + height * Math.max(0.04, Math.min(0.96, recipe.y + jitterY)),
+      ] as Coordinate;
+    });
+    return recipes.map((recipe, recipeIndex) => {
+      const site = sites[recipeIndex];
+      const cy = site[1];
       const variantKind = landmassIndex === 0 && recipeIndex === 0 ? "rainforest" : recipe.kind;
       return {
         id: `terrain-patch-${landmassIndex}-${recipeIndex}`,
-        cx,
-        cy,
-        rx: width * recipe.rx * (0.86 + terrainUnit(props.alliance.seed, `${landmassIndex}:rx:${recipeIndex}`) * 0.2),
-        ry: height * recipe.ry * (0.86 + terrainUnit(props.alliance.seed, `${landmassIndex}:ry:${recipeIndex}`) * 0.2),
+        polygon: allianceCell(site, sites),
         kind: climateSafeKind(variantKind, cy),
-        rotation: (terrainUnit(props.alliance.seed, `${landmassIndex}:rotation:${recipeIndex}`) - 0.5) * 28,
         opacity: 0.44 + terrainUnit(props.alliance.seed, `${landmassIndex}:opacity:${recipeIndex}`) * 0.16,
       };
     });
@@ -487,9 +498,7 @@ onUnmounted(() => {
       <g class="alliance-climate-field" clip-path="url(#alliance-land-clip)" aria-label="气候渐变">
         <rect :x="worldBounds[0]" :y="worldBounds[1]" :width="worldBounds[2]" :height="worldBounds[3]" class="alliance-climate-field__gradient" />
         <rect :x="worldBounds[0]" :y="worldBounds[1]" :width="worldBounds[2]" :height="worldBounds[3]" class="alliance-climate-field__noise" />
-        <ellipse :cx="worldCenter[0]" :cy="worldBounds[1] + 90" :rx="worldBounds[2] * 0.58" :ry="worldBounds[3] * 0.17" class="alliance-climate-wash alliance-climate-wash--ice" />
-        <ellipse :cx="worldCenter[0]" :cy="worldBounds[1] + worldBounds[3] - 90" :rx="worldBounds[2] * 0.58" :ry="worldBounds[3] * 0.17" class="alliance-climate-wash alliance-climate-wash--ice" />
-        <ellipse v-for="patch in terrainPatches" :key="patch.id" :cx="patch.cx" :cy="patch.cy" :rx="patch.rx" :ry="patch.ry" :transform="`rotate(${patch.rotation} ${patch.cx} ${patch.cy})`" :class="['alliance-biome-patch', `alliance-biome-patch--${patch.kind}`]" :style="{ opacity: patch.opacity }" />
+        <polygon v-for="patch in terrainPatches" :key="patch.id" :points="alliancePolygon(patch.polygon)" :class="['alliance-biome-patch', `alliance-biome-patch--${patch.kind}`]" :style="{ opacity: patch.opacity }" />
       </g>
 
       <g class="alliance-countries" clip-path="url(#alliance-land-clip)" aria-label="大陆国家">
