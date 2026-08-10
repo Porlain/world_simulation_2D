@@ -35,6 +35,14 @@ export interface AllianceRegion {
   colorIndex: number;
 }
 
+export interface AllianceCountry {
+  id: string;
+  name: string;
+  polygon: Coordinate[];
+  labelPosition: Coordinate;
+  colorIndex: number;
+}
+
 export interface AllianceTerrainBand {
   id: string;
   label: string;
@@ -53,6 +61,7 @@ export interface AllianceModel {
   mountains: Coordinate[][];
   rivers: Coordinate[][];
   lakes: Coordinate[][];
+  countries: AllianceCountry[];
   regions: AllianceRegion[];
   settlements: AllianceSettlement[];
   roads: AllianceRoad[];
@@ -70,6 +79,12 @@ function stableUnit(seed: number, key: string): number {
 
 function point(x: number, y: number): Coordinate {
   return [Math.round(x * 10) / 10, Math.round(y * 10) / 10];
+}
+
+function polygonBounds(points: Coordinate[]): AlliancePlacementBounds {
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
 }
 
 const ALLIANCE_SOURCE_BOUNDS = { x0: 45, x1: 920, y0: 90, y1: 850 };
@@ -302,6 +317,30 @@ function regionCell(site: Coordinate, sites: Coordinate[]): Coordinate[] {
   return polygon;
 }
 
+function countrySite(seed: number, key: string, polygon: Coordinate[], anchor: Coordinate): Coordinate {
+  const bounds = polygonBounds(polygon);
+  const anchored = point(
+    bounds.x0 + anchor[0] * (bounds.x1 - bounds.x0),
+    bounds.y0 + anchor[1] * (bounds.y1 - bounds.y0),
+  );
+  if (pointInsidePolygon(anchored, polygon)) return anchored;
+  const center = polygonCentroid(polygon);
+  for (const weight of [0.18, 0.36, 0.54, 0.72, 0.9]) {
+    const candidate = point(
+      anchored[0] + (center[0] - anchored[0]) * weight,
+      anchored[1] + (center[1] - anchored[1]) * weight,
+    );
+    if (pointInsidePolygon(candidate, polygon)) return candidate;
+  }
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const x = bounds.x0 + stableUnit(seed, `${key}:x:${attempt}`) * (bounds.x1 - bounds.x0);
+    const y = bounds.y0 + stableUnit(seed, `${key}:y:${attempt}`) * (bounds.y1 - bounds.y0);
+    const candidate = point(x, y);
+    if (pointInsidePolygon(candidate, polygon)) return candidate;
+  }
+  return polygonCentroid(polygon);
+}
+
 function pointInsidePolygon(candidate: Coordinate, polygon: Coordinate[]): boolean {
   let inside = false;
   for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
@@ -489,32 +528,34 @@ function settlement(
 }
 
 const CONTINENT_SPECS: ContinentSpec[] = [
-  { key: "continent-northwest", center: point(430, 330), radius: point(360, 245), rotation: -0.14, vertices: 28 },
-  { key: "continent-northeast", center: point(2680, 315), radius: point(420, 255), rotation: 0.16, vertices: 30 },
-  { key: "continent-western", center: point(390, 980), radius: point(295, 235), rotation: -0.2, vertices: 26 },
-  { key: "continent-eastern", center: point(2790, 1020), radius: point(325, 250), rotation: 0.1, vertices: 27 },
-  { key: "continent-central", center: point(1570, 850), radius: point(650, 430), rotation: -0.06, vertices: 34 },
-  { key: "continent-southwest", center: point(700, 1480), radius: point(330, 215), rotation: 0.18, vertices: 26 },
-  { key: "continent-southeast", center: point(2460, 1480), radius: point(350, 220), rotation: -0.12, vertices: 27 },
-  { key: "continent-south-polar", center: point(1600, 1755), radius: point(650, 72), rotation: 0, vertices: 26 },
-];
-
-const ISLAND_SPECS: ContinentSpec[] = [
-  { key: "island-north-channel", center: point(1540, 235), radius: point(105, 62), rotation: -0.1, vertices: 16 },
-  { key: "island-west-channel", center: point(980, 475), radius: point(92, 66), rotation: 0.2, vertices: 15 },
-  { key: "island-east-channel", center: point(2170, 505), radius: point(115, 70), rotation: -0.18, vertices: 17 },
-  { key: "island-south-channel", center: point(1580, 1430), radius: point(125, 70), rotation: 0.12, vertices: 17 },
-  { key: "island-far-east", center: point(3070, 610), radius: point(72, 125), rotation: 0.18, vertices: 16 },
-  { key: "island-far-west", center: point(120, 1450), radius: point(95, 62), rotation: -0.1, vertices: 15 },
+  { key: "continent-main", center: point(1600, 900), radius: point(1240, 630), rotation: -0.04, vertices: 48 },
 ];
 
 export function createAlliance(seed = 20260808): AllianceModel {
-  const hostIndex = Math.floor(stableUnit(seed, "alliance-host") * (CONTINENT_SPECS.length - 1));
-  const hostSpec = CONTINENT_SPECS[hostIndex];
+  const hostSpec = CONTINENT_SPECS[0];
   const continentShapes = CONTINENT_SPECS.map((spec) => continentShape(spec, seed));
-  const hostPolygon = continentShapes[hostIndex];
+  const hostPolygon = continentShapes[0];
   const placement = alliancePlacement(seed, hostSpec, hostPolygon);
   const territory = allianceTerritory(placement);
+  const countryNames = [
+    "北境联邦", "霜河王国", "晨曦共和国", "青岚公国", "灰岭侯国",
+    "碧潮联盟", "赤岩王国", "长风共和国", "南湾公国", "曙光联邦", "东陆王国",
+  ];
+  const countryAnchors: Coordinate[] = [
+    [0.14, 0.26], [0.34, 0.16], [0.56, 0.2], [0.72, 0.27],
+    [0.2, 0.47], [0.44, 0.4], [0.68, 0.43], [0.84, 0.56],
+    [0.25, 0.73], [0.52, 0.72], [0.68, 0.78],
+  ];
+  const countrySites = countryNames.map((_, index) =>
+    countrySite(seed, `country-${index}`, hostPolygon, countryAnchors[index]),
+  );
+  const countries: AllianceCountry[] = countryNames.map((name, index) => ({
+    id: `country-${index.toString().padStart(2, "0")}`,
+    name,
+    polygon: regionCell(countrySites[index], countrySites),
+    labelPosition: countrySites[index],
+    colorIndex: index,
+  }));
   const settlements: AllianceSettlement[] = [];
   const capitals = [
     settlement("capital-northwest", "霜原城", "capital", fitAlliancePoint(point(210, 190), placement), 78_000, null, "北方边境", seed + 11, { influenceRadius: 250 }),
@@ -649,7 +690,6 @@ export function createAlliance(seed = 20260808): AllianceModel {
 
   const landmasses: Coordinate[][] = [
     ...continentShapes,
-    ...ISLAND_SPECS.map((spec) => continentShape(spec, seed)),
   ];
   const mountains: Coordinate[][] = [
     mountainRange(point(410, 330), 560, 86, -0.22, seed, "mountain-northwest"),
@@ -718,6 +758,7 @@ export function createAlliance(seed = 20260808): AllianceModel {
     mountains,
     rivers,
     lakes,
+    countries,
     regions,
     settlements,
     roads,

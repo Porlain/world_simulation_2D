@@ -40,7 +40,9 @@ test("alliance generation is deterministic and keeps its settlement hierarchy", 
   assert.ok(first.mountains.length >= 3);
   assert.ok(first.rivers.length >= 3);
   assert.ok(first.lakes.length >= 3);
-  assert.ok(first.landmasses.length >= 10);
+  assert.equal(first.landmasses.length, 1);
+  assert.equal(first.countries.length, 11);
+  assert.ok(first.countries.every((country) => country.polygon.length >= 3));
   assert.equal(first.regions.length, 5);
   assert.ok(first.regions.every((region) => region.polygon.length >= 3));
   assert.ok(first.regions.every((region) => first.settlements.some((settlement) => settlement.id === region.capitalId)));
@@ -83,20 +85,25 @@ test("alliance generation is deterministic and keeps its settlement hierarchy", 
 });
 
 test("the alliance occupies a seeded subsection of one host continent", () => {
-  const hostIndexes = new Set();
+  const territoryCenters = new Set();
   for (const seed of [2, 3, 1234, 5678, 20260808]) {
     const alliance = createAlliance(seed);
-    const hostIndex = alliance.landmasses.findIndex((landmass) =>
-      alliance.territory.every((item) => pointInsidePolygon(item, landmass)),
-    );
-    assert.ok(hostIndex >= 0, `seed ${seed} has no continent containing the alliance`);
+    assert.equal(alliance.landmasses.length, 1);
     assert.ok(
-      boundingArea(alliance.territory) / boundingArea(alliance.landmasses[hostIndex]) < 0.28,
+      alliance.territory.every((item) => pointInsidePolygon(item, alliance.landmasses[0])),
+      `seed ${seed} has territory outside the main continent`,
+    );
+    assert.ok(
+      boundingArea(alliance.territory) / boundingArea(alliance.landmasses[0]) < 0.16,
       `seed ${seed} makes the alliance too large for its host continent`,
     );
-    hostIndexes.add(hostIndex);
+    const center = alliance.territory.reduce(
+      (result, [x, y]) => [result[0] + x / alliance.territory.length, result[1] + y / alliance.territory.length],
+      [0, 0],
+    );
+    territoryCenters.add(center.map((value) => Math.round(value)).join(","));
   }
-  assert.ok(hostIndexes.size >= 3, "the host continent should vary with the world seed");
+  assert.ok(territoryCenters.size >= 4, "the alliance position should vary with the world seed");
 });
 
 test("alliance roads meet only at declared settlements", () => {

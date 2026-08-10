@@ -268,7 +268,7 @@ const terrainPatches = computed<TerrainPatch[]>(() => {
       const jitterY = (terrainUnit(props.alliance.seed, `${landmassIndex}:y:${recipeIndex}`) - 0.5) * 0.18;
       const cx = bounds.x0 + width * Math.max(0.08, Math.min(0.92, recipe.x + jitterX));
       const cy = bounds.y0 + height * Math.max(0.08, Math.min(0.92, recipe.y + jitterY));
-      const variantKind = landmassIndex === 2 && recipeIndex === 0 ? "rainforest" : recipe.kind;
+      const variantKind = landmassIndex === 0 && recipeIndex === 0 ? "rainforest" : recipe.kind;
       return {
         id: `terrain-patch-${landmassIndex}-${recipeIndex}`,
         cx,
@@ -492,6 +492,13 @@ onUnmounted(() => {
         <ellipse v-for="patch in terrainPatches" :key="patch.id" :cx="patch.cx" :cy="patch.cy" :rx="patch.rx" :ry="patch.ry" :transform="`rotate(${patch.rotation} ${patch.cx} ${patch.cy})`" :class="['alliance-biome-patch', `alliance-biome-patch--${patch.kind}`]" :style="{ opacity: patch.opacity }" />
       </g>
 
+      <g class="alliance-countries" clip-path="url(#alliance-land-clip)" aria-label="大陆国家">
+        <g v-for="country in alliance.countries" :key="country.id">
+          <polygon :points="alliancePolygon(country.polygon)" :class="['alliance-country', `alliance-country--${country.colorIndex % 8}`]" />
+          <text v-if="detailLevel !== 'settlements'" :x="country.labelPosition[0]" :y="country.labelPosition[1]" text-anchor="middle" class="alliance-country__label">{{ country.name }}</text>
+        </g>
+      </g>
+
       <g class="alliance-territory" aria-label="人类联盟控制区">
         <polygon :points="alliancePolygon(alliance.territory)" class="alliance-territory__fill" />
         <text :x="territoryLabelPosition[0]" :y="territoryLabelPosition[1]" class="alliance-territory__label">人类联盟控制区</text>
@@ -676,6 +683,17 @@ onUnmounted(() => {
 .alliance-biome-patch--rainforest { fill: url("#alliance-rainforest-gradient"); }
 .alliance-biome-patch--wetland { fill: url("#alliance-wetland-gradient"); }
 .alliance-biome-patch--rock { fill: url("#alliance-rock-gradient"); }
+.alliance-countries { pointer-events: none; }
+.alliance-country { stroke: #656b68; stroke-width: 3; stroke-dasharray: 9 8; stroke-opacity: 0.58; }
+.alliance-country--0 { fill: #dbe7c5; fill-opacity: 0.52; }
+.alliance-country--1 { fill: #f0dfad; fill-opacity: 0.5; }
+.alliance-country--2 { fill: #c7e2e1; fill-opacity: 0.5; }
+.alliance-country--3 { fill: #e8cfc0; fill-opacity: 0.5; }
+.alliance-country--4 { fill: #d9d0e8; fill-opacity: 0.5; }
+.alliance-country--5 { fill: #d7e2c4; fill-opacity: 0.5; }
+.alliance-country--6 { fill: #efd6b7; fill-opacity: 0.5; }
+.alliance-country--7 { fill: #cfe0ed; fill-opacity: 0.5; }
+.alliance-country__label { fill: #3e3e4b; font: 700 36px "Noto Sans SC Variable", sans-serif; paint-order: stroke; stroke: #f4f0df; stroke-width: 7px; stroke-linejoin: round; }
 .alliance-band-label { fill: var(--terrain-ink); font: 600 15px "Noto Sans SC Variable", sans-serif; letter-spacing: 1px; opacity: 0.66; paint-order: stroke; stroke: var(--terrain-ocean); stroke-width: 4px; }
 .alliance-equator { stroke: #d06324; stroke-width: 2; stroke-dasharray: 9 10; opacity: 0.82; }
 .alliance-equator-label { fill: #3e3e4b; font: 700 14px "Noto Sans SC Variable", sans-serif; paint-order: stroke; stroke: var(--terrain-ocean); stroke-width: 4px; }
